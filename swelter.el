@@ -1,24 +1,24 @@
 ;;; swelter.el --- A swagger client generator.
 
+;;; Code:
+
 ;; is this the best choice?
 (require 'url)
 
 (defcustom swelter-client-dir "~/.swelter-clients/"
-  "Where to store generated clients.")
+  "Where to store generated clients."
+  :type 'string)
 
 (defun swelter-generate (url client)
   "Generate CLIENT from URL."
   (interactive)
   ;; download file and convert
-  ;; TODO may be nil
-  ;; TODO may 404
-  (let* ((file-buff (url-retrieve-synchronously url))
-         (swagger-json (with-current-buffer file-buff
-                         ;; skip to body after empty line
-                         (while (looking-at "^.") (delete-line))
-                         (json-parse-buffer))))
-    ;; (print swagger-json)
-    (swelter--build-get-endpoint "test" "/form-type/{id}" (gethash "get" (gethash "/form-type/{id}" (gethash "paths" swagger-json))))
+  (let ((swagger-json (swelter--get-swagger-json url)))
+
+    (swelter--build-get-endpoint "test"
+                          "/pet/{petId}"
+                          ;; TODO the subpath must be an exact match including param names
+                          (map-nested-elt swagger-json (list "paths" "/pet/{petId}" "get")))
     ;; create client dir
     ;; create skeleton
     ;; - paths
@@ -28,10 +28,24 @@
   ;; map each endpoint to a fn
   ))
 
-(defun swelter--swagger-json-p (args)
-   "Tests if ARG is a swagger file."
-   ;; has top level key openapi: 3.0.0
-   ())
+(defun swelter--get-swagger-json (url)
+  "Get and parse swagger.json from URL.
+
+Throws if missing or not a valid json."
+  ;; TODO handle json parse error?
+  (let* ((file-buff (url-retrieve-synchronously url))
+         (swagger-json (with-current-buffer file-buff
+                         ;; skip to body after empty line
+                         (goto-char (point-min))
+                         (while (looking-at "^.") (delete-line))
+                         (json-parse-buffer))))
+    swagger-json))
+
+(defun swelter--get-swagger-version (swagger-json)
+  "Return version string of SWAGGER-JSON.  Nil if not a swagger file."
+  (or (map-elt swagger-json "openapi")
+      ;; for version 2.0
+      (map-elt swagger-json "swagger")))
 
 ;; TODO can this be modified by the "servers" prop?
 (defun swelter--get-server-root-url (url)
