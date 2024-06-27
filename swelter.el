@@ -31,21 +31,29 @@
           (-let [(http-verb . path-obj) http-verb-value]
             (cond
              ((equal http-verb "get")
-              ;; TODO nil should print as ()
-              (print (swelter--build-get-endpoint (make-symbol (swelter--make-function-name client http-verb path)) path path-obj) (current-buffer)))
+              ;; TODO nil should print as ()?
+              (print (swelter--build-get-endpoint
+                      (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
+                      path
+                      path-obj)
+                     (current-buffer)))
              ;; ((equal http-verb "post")
              ;;  () ;; TODO
              ;;  )
              ((equal http-verb "delete")
-              (print (swelter--build-delete-endpoint (make-symbol (swelter--make-function-name client http-verb path)) path path-obj) (current-buffer)))
-              )
-             ;; ((equal http-verb "put")
-             ;;  () ;; TODO
-             ;;  )
-             ;; ((equal http-verb "patch")
-             ;;  () ;; TODO
-             ;;  )
-             )))))
+              (print (swelter--build-delete-endpoint
+                      (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
+                      path
+                      path-obj)
+                     (current-buffer)))
+             )
+            ;; ((equal http-verb "put")
+            ;;  () ;; TODO
+            ;;  )
+            ;; ((equal http-verb "patch")
+            ;;  () ;; TODO
+            ;;  )
+            )))))
 
     ;; also
     ;; - info
@@ -77,13 +85,25 @@ Throws if missing or not a valid json."
    "Gets the root url from the swagger URL."
    (url-basepath url))
 
-(defun swelter--make-function-name (client-name http-verb path)
-  "Create a function name roughly matching the API endpoint."
+(defun swelter--make-function-name (client-name http-verb path &optional operation-id)
+  "Create a skewer-case function name roughly matching the API endpoint.
+
+If OPERATION-ID is given, the name is {CLIENT-NAME}-{OPERATION-ID}.
+Otherwise it is {CLIENT-NAME}-{HTTP-VERB}-{PATH} with path params removed.
+In both cases the result is transformed to skewer-case.
+
+Assumes CLIENT-NAME is already skewer-case, and PATH does not include any http:// prefix."
+
+  (if operation-id
+      (let* ((op-name-lower (s-snake-case operation-id))
+             (op-name (string-replace "_" "-" op-name-lower)))
+        (format "%s-%s" client-name op-name))
+    ;; fallback to verb-path
     (let* ((path-words (string-split path "/" 't))
            (path-clean (--filter (not (string-prefix-p "{" it)) path-words))
            (path-lower (-map #'s-snake-case path-clean))
            (path-skewer (string-replace "_" "-" (string-join path-lower "-"))))
-     (format "%s-%s-%s" client-name http-verb path-skewer)))
+      (format "%s-%s-%s" client-name http-verb path-skewer))))
 
 (defun swelter--path-param-sexp (path)
   "Convert PATH to a s-exp over parameters.
