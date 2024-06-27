@@ -7,6 +7,9 @@
 (require 'dash)
 (require 's)
 
+;; NOTE this is made for Swagger v2 for now
+;; one difference is body replaced
+
 (defcustom swelter-client-dir "~/.swelter-clients"
   "Where to store generated clients."
   :type 'string)
@@ -37,9 +40,12 @@
                       path
                       path-obj)
                      (current-buffer)))
-             ;; ((equal http-verb "post")
-             ;;  () ;; TODO
-             ;;  )
+             ((equal http-verb "post")
+              (print (swelter--build-post-endpoint
+                      (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
+                      path
+                      path-obj)
+                     (current-buffer)))
              ((equal http-verb "delete")
               (print (swelter--build-delete-endpoint
                       (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
@@ -181,6 +187,57 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
          ;; TODO may not always be json!
          (json-parse-buffer))))
    ))
+
+;; TODO this is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
+(defun swelter--build-post-endpoint (name path obj)
+  (-let* ((path-sexp (swelter--path-param-sexp path))
+          (docstring (or (map-elt obj "summary")
+                         (format "GET %s." path)))
+          (parameters (map-elt obj "parameters"))
+          ;; assume all path params required
+          ((&alist "path" path-params
+                   "query" query-params
+                   "formData" form-params
+                   "body" body-params)
+           (seq-group-by (lambda (x) (map-elt x "in"))
+                         parameters))
+          ((&alist 't query-params-req
+                   :false query-params-opt)
+           (seq-group-by (lambda (x) (map-elt x "required"))
+                         query-params))
+          ((&alist 't form-params-req
+                   :false form-params-opt)
+           (seq-group-by (lambda (x) (map-elt x "required"))
+                         form-params))
+          (required-params (--map (make-symbol (map-elt it "name")) (append path-params query-params-req form-params-req body-params)))
+          (optional-params (--map (make-symbol (map-elt it "name")) (append query-params-opt form-params-opt)))
+          ;; function args
+          (params `(,@required-params
+                    ,@(when optional-params (cons '&optional optional-params))))
+          (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params))
+          (build-form-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) form-params))
+          ;; build headers and body
+          ;; TODO can body params be described individually?
+          (_ (when (> (length body-params) 1) (error "Multiple parameters for body")))
+          (header-and-body (if body-params
+                               ;; json
+                               `((url-request-data (json-encode ,(make-symbol (map-elt (car body-params) "name"))))
+                                 (url-request-extra-headers '(("Content-Type" . "application/json"))))
+                             ;; form
+                             `((url-request-data (url-build-query-string (list ,@build-form-string-arg)))
+                               (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))))))
+
+
+    `(defun ,name ,params
+       ,docstring
+       (let* ((url-request-method "POST")
+              ,@header-and-body
+              (res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
+         (with-current-buffer res
+           (goto-char (point-min))
+           (while (looking-at "^.") (delete-line))
+           (json-parse-buffer)))))
+    )
 
 (provide 'swelter)
 ;;; swelter.el ends here
