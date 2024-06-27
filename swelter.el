@@ -4,28 +4,53 @@
 
 ;; is this the best choice?
 (require 'url)
+(require 'dash)
+(require 's)
 
-(defcustom swelter-client-dir "~/.swelter-clients/"
+(defcustom swelter-client-dir "~/.swelter-clients"
   "Where to store generated clients."
   :type 'string)
 
 (defun swelter-generate (url client)
-  "Generate CLIENT from URL."
+  "Generate CLIENT from swagger file at URL."
   (interactive)
   ;; download file and convert
   (let ((swagger-json (swelter--get-swagger-json url)))
-
-    (swelter--build-get-endpoint "test"
-                          "/pet/{petId}"
-                          ;; TODO the subpath must be an exact match including param names
-                          (map-nested-elt swagger-json (list "paths" "/pet/{petId}" "get")))
     ;; create client dir
-    ;; create skeleton
-    ;; - paths
+    (make-directory (concat swelter-client-dir "/" client) 't)
+
+    ;; TODO don't open but oh well
+    (find-file (concat swelter-client-dir "/" client "/" "my-foo-client.el"))
+
+    ;; TODO account for host and basePath
+
+    (dolist (path-value (map-pairs (map-elt swagger-json "paths")))
+      (-let [(path . endpoint-obj) path-value]
+        ;; path is e.g. "/pet/{petId}"
+        (dolist (http-verb-value (map-pairs endpoint-obj))
+          (-let [(http-verb . path-obj) http-verb-value]
+            (cond
+             ((equal http-verb "get")
+              ;; TODO nil should print as ()
+              (print (swelter--build-get-endpoint (make-symbol (swelter--make-function-name client http-verb path)) path path-obj) (current-buffer)))
+             ((equal http-verb "post")
+              () ;; TODO
+              )
+             ((equal http-verb "delete")
+              () ;; TODO
+              )
+             ((equal http-verb "put")
+              () ;; TODO
+              )
+             ((equal http-verb "patch")
+              () ;; TODO
+              )
+             )))))
+
+    ;; also
     ;; - info
     ;; - tags
     ;; - servers
-  ;; map each endpoint to a fn
   ))
 
 (defun swelter--get-swagger-json (url)
@@ -52,52 +77,59 @@ Throws if missing or not a valid json."
    "Gets the root url from the swagger URL."
    (url-basepath url))
 
+(defun swelter--make-function-name (client-name http-verb path)
+  "Create a function name roughly matching the API endpoint."
+    (let* ((path-words (string-split path "/" 't))
+           (path-clean (--filter (not (string-prefix-p "{" it)) path-words))
+           (path-lower (-map #'s-snake-case path-clean))
+           (path-skewer (string-replace "_" "-" (string-join path-lower "-"))))
+     (format "%s-%s-%s" client-name http-verb path-skewer)))
+
 (defun swelter--path-param-sexp (path)
-  "Convert PATH to a s-exp over parameters."
+  "Convert PATH to a s-exp over parameters.
+
+E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
   ;; TODO the path params might have names that are captured, maybe give them a prefix?
-  `(string-join
-    (list ,(mapcar
-            (lambda (x) (if (string-prefix-p "/" x)
-                            (string-trim x "/")
-                          (make-symbol x)))
-     (string-split path "/{\\|}" t)))
-    "/")
-  )
+  ;; TODO assumes path is absolute
 
-(defun swelter--build-get-endpoint (client path obj)
-  ;; check for path params, e.g. /foo/{id}
-  (let* ((path-sexp (swelter--path-param-sexp path))
-         ;; summary -> docstring
-         (parameters (gethash "parameters" obj))
+  (let* ((parts (string-split path "/{\\|}" t))
+         (params (-map #'intern (--filter (not (string-prefix-p "/" it)) parts)))
+         (format-string (replace-regexp-in-string "{[^}]+}" "%s" path)))
+
+    `(format ,format-string ,@params)))
+
+(defun swelter--build-get-endpoint (name path obj)
+  (-let* ((path-sexp (swelter--path-param-sexp path))
+         (docstring (or (map-elt obj "summary")
+                        (format "GET %s." path)))
+         (parameters (map-elt obj "parameters"))
          ;; assume all path params required
-         (path-params (mapcar (lambda (x) (gethash "name" x)) (seq-filter
-                       (lambda (x) (string-equal (gethash "in" x) "path"))
-                       parameters)))
-         (query-params (seq-filter
-                        (lambda (x) (string-equal (gethash "in" x) "query"))
-                        parameters))
-         (query-params-split (seq-group-by
-                              (lambda (x) (gethash "required" x))
-                              query-params))
-         (query-params-req (mapcar (lambda (x) (gethash "name" x)) (cdr (car query-params-split))))
-         (query-params-opt (mapcar (lambda (x) (gethash "name" x)) (cdr (nth 1 query-params-split))))
-         (params (seq-concatenate 'list (mapcar 'make-symbol path-params) (mapcar 'make-symbol query-params-req) '('&optional) (mapcar 'make-symbol query-params-opt))))
+         ((&alist "path" path-params "query" query-params) (seq-group-by
+                     (lambda (x) (map-elt x "in"))
+                     parameters))
+         ((&alist t query-params-req "&false" query-params-opt) (seq-group-by
+              (lambda (x) (map-elt x "required"))
+              query-params))
+         ;; function args
+         (params `(,@(--map (make-symbol (map-elt it "name")) path-params)
+                   ,@(--map (make-symbol (map-elt it "name")) query-params-req)
+                   ,@(when query-params-opt
+                       (cons '&optional (--map (make-symbol (map-elt it "name")) query-params-opt)))))
+         (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list name (make-symbol name))) query-params)))
 
-    ;; (url-build-query-string
-    ;;  '((key1 val1)
-    ;;    (key2 val2)))                     ;
   ;; optional
   ;; operationId ??
    ;; responses
    ;; tags
    ;; security
 
-  `(defun ,(make-symbol (string-join '("client" "get" "foo") "-")) ,params ,(gethash "summary" obj)
-          (let ((res (url-retrieve-synchronously (concat server-root path-sexp "?" query1 "=" q1 "&" so))))
-            (check-errors)
-            (jump-to-body)
-            (with-current-buffer res (json-parse-buffer))
-          ))
+  `(defun ,name ,params
+     ,docstring
+     (let ((res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string ,build-query-string-arg)))))))
+       (with-current-buffer res
+         (goto-char (point-min))
+         (while (looking-at "^.") (delete-line))
+         (json-parse-buffer))))
    ))
 
 (provide 'swelter)
