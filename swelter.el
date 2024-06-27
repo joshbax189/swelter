@@ -33,25 +33,25 @@
              ((equal http-verb "get")
               ;; TODO nil should print as ()
               (print (swelter--build-get-endpoint (make-symbol (swelter--make-function-name client http-verb path)) path path-obj) (current-buffer)))
-             ((equal http-verb "post")
-              () ;; TODO
-              )
+             ;; ((equal http-verb "post")
+             ;;  () ;; TODO
+             ;;  )
              ((equal http-verb "delete")
-              () ;; TODO
+              (print (swelter--build-delete-endpoint (make-symbol (swelter--make-function-name client http-verb path)) path path-obj) (current-buffer)))
               )
-             ((equal http-verb "put")
-              () ;; TODO
-              )
-             ((equal http-verb "patch")
-              () ;; TODO
-              )
+             ;; ((equal http-verb "put")
+             ;;  () ;; TODO
+             ;;  )
+             ;; ((equal http-verb "patch")
+             ;;  () ;; TODO
+             ;;  )
              )))))
 
     ;; also
     ;; - info
     ;; - tags
     ;; - servers
-  ))
+  )
 
 (defun swelter--get-swagger-json (url)
   "Get and parse swagger.json from URL.
@@ -107,7 +107,7 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
          ((&alist "path" path-params "query" query-params) (seq-group-by
                      (lambda (x) (map-elt x "in"))
                      parameters))
-         ((&alist t query-params-req "&false" query-params-opt) (seq-group-by
+         ((&alist 't query-params-req :false query-params-opt) (seq-group-by
               (lambda (x) (map-elt x "required"))
               query-params))
          ;; function args
@@ -115,7 +115,7 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
                    ,@(--map (make-symbol (map-elt it "name")) query-params-req)
                    ,@(when query-params-opt
                        (cons '&optional (--map (make-symbol (map-elt it "name")) query-params-opt)))))
-         (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list name (make-symbol name))) query-params)))
+         (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params)))
 
   ;; optional
   ;; operationId ??
@@ -125,10 +125,40 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
 
   `(defun ,name ,params
      ,docstring
-     (let ((res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string ,build-query-string-arg)))))))
+     (let ((res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
        (with-current-buffer res
          (goto-char (point-min))
          (while (looking-at "^.") (delete-line))
+         (json-parse-buffer))))
+   ))
+
+(defun swelter--build-delete-endpoint (name path obj)
+  (-let* ((path-sexp (swelter--path-param-sexp path))
+         (docstring (or (map-elt obj "summary")
+                        (format "DELETE %s." path)))
+         (parameters (map-elt obj "parameters"))
+         ;; assume all path params required
+         ((&alist "path" path-params "query" query-params) (seq-group-by
+                     (lambda (x) (map-elt x "in"))
+                     parameters))
+         ((&alist 't query-params-req :false query-params-opt) (seq-group-by
+              (lambda (x) (map-elt x "required"))
+              query-params))
+         ;; function args
+         (params `(,@(--map (make-symbol (map-elt it "name")) path-params)
+                   ,@(--map (make-symbol (map-elt it "name")) query-params-req)
+                   ,@(when query-params-opt
+                       (cons '&optional (--map (make-symbol (map-elt it "name")) query-params-opt)))))
+         (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params)))
+
+  `(defun ,name ,params
+     ,docstring
+     (let* ((url-request-method "DELETE")
+            (res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
+       (with-current-buffer res
+         (goto-char (point-min))
+         (while (looking-at "^.") (delete-line))
+         ;; TODO may not always be json!
          (json-parse-buffer))))
    ))
 
