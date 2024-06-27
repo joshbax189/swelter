@@ -26,39 +26,24 @@
     (find-file (concat swelter-client-dir "/" client "/" "my-foo-client.el"))
 
     ;; TODO account for host and basePath
+    (print
+     `(defvar ,(intern  (format "%s-api-version" client)) ,(map-nested-elt swagger-json '("info" "version")))
+     (current-buffer))
+
+    ;; TODO set root server path
 
     (dolist (path-value (map-pairs (map-elt swagger-json "paths")))
       (-let [(path . endpoint-obj) path-value]
         ;; path is e.g. "/pet/{petId}"
         (dolist (http-verb-value (map-pairs endpoint-obj))
           (-let [(http-verb . path-obj) http-verb-value]
-            (cond
-             ((equal http-verb "get")
-              ;; TODO nil should print as ()?
-              (print (swelter--build-get-endpoint
-                      (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
-                      path
-                      path-obj)
-                     (current-buffer)))
-             ((equal http-verb "post")
-              (print (swelter--build-post-endpoint
-                      (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
-                      path
-                      path-obj)
-                     (current-buffer)))
-             ((equal http-verb "delete")
-              (print (swelter--build-delete-endpoint
-                      (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
-                      path
-                      path-obj)
-                     (current-buffer)))
-             )
-            ;; ((equal http-verb "put")
-            ;;  () ;; TODO
-            ;;  )
-            ;; ((equal http-verb "patch")
-            ;;  () ;; TODO
-            ;;  )
+            ;; TODO nil should print as ()?
+            (print (swelter--build-endpoint
+                    http-verb
+                    (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
+                    path
+                    path-obj)
+                   (current-buffer))
             )))))
 
     ;; also
@@ -124,75 +109,11 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
 
     `(format ,format-string ,@params)))
 
-(defun swelter--build-get-endpoint (name path obj)
-  (-let* ((path-sexp (swelter--path-param-sexp path))
-         (docstring (or (map-elt obj "summary")
-                        (format "GET %s." path)))
-         (parameters (map-elt obj "parameters"))
-         ;; assume all path params required
-         ((&alist "path" path-params "query" query-params) (seq-group-by
-                     (lambda (x) (map-elt x "in"))
-                     parameters))
-         ((&alist 't query-params-req :false query-params-opt) (seq-group-by
-              (lambda (x) (map-elt x "required"))
-              query-params))
-         ;; function args
-         (params `(,@(--map (make-symbol (map-elt it "name")) path-params)
-                   ,@(--map (make-symbol (map-elt it "name")) query-params-req)
-                   ,@(when query-params-opt
-                       (cons '&optional (--map (make-symbol (map-elt it "name")) query-params-opt)))))
-         (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params)))
-
-  ;; optional
-  ;; operationId ??
-   ;; responses
-   ;; tags
-   ;; security
-
-  `(defun ,name ,params
-     ,docstring
-     (let ((res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
-       (with-current-buffer res
-         (goto-char (point-min))
-         (while (looking-at "^.") (delete-line))
-         (json-parse-buffer))))
-   ))
-
-(defun swelter--build-delete-endpoint (name path obj)
-  (-let* ((path-sexp (swelter--path-param-sexp path))
-         (docstring (or (map-elt obj "summary")
-                        (format "DELETE %s." path)))
-         (parameters (map-elt obj "parameters"))
-         ;; assume all path params required
-         ((&alist "path" path-params "query" query-params) (seq-group-by
-                     (lambda (x) (map-elt x "in"))
-                     parameters))
-         ((&alist 't query-params-req :false query-params-opt) (seq-group-by
-              (lambda (x) (map-elt x "required"))
-              query-params))
-         ;; function args
-         (params `(,@(--map (make-symbol (map-elt it "name")) path-params)
-                   ,@(--map (make-symbol (map-elt it "name")) query-params-req)
-                   ,@(when query-params-opt
-                       (cons '&optional (--map (make-symbol (map-elt it "name")) query-params-opt)))))
-         (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params)))
-
-  `(defun ,name ,params
-     ,docstring
-     (let* ((url-request-method "DELETE")
-            (res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
-       (with-current-buffer res
-         (goto-char (point-min))
-         (while (looking-at "^.") (delete-line))
-         ;; TODO may not always be json!
-         (json-parse-buffer))))
-   ))
-
 ;; TODO this is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
-(defun swelter--build-post-endpoint (name path obj)
+(defun swelter--build-endpoint (http-verb name path obj)
   (-let* ((path-sexp (swelter--path-param-sexp path))
           (docstring (or (map-elt obj "summary")
-                         (format "GET %s." path)))
+                         (format "%s %s." http-verb path)))
           (parameters (map-elt obj "parameters"))
           ;; assume all path params required
           ((&alist "path" path-params
@@ -226,11 +147,12 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
                              ;; form
                              `((url-request-data (url-build-query-string (list ,@build-form-string-arg)))
                                (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))))))
-
+   ;; responses
+   ;; security
 
     `(defun ,name ,params
        ,docstring
-       (let* ((url-request-method "POST")
+       (let* ((url-request-method ,(upcase http-verb))
               ,@header-and-body
               (res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
          (with-current-buffer res
