@@ -14,14 +14,14 @@
   "Generate CLIENT from swagger file at URL."
   (interactive)
   ;; download file and convert
-  (let ((swagger-json (swelter--get-swagger-json url)))
+  (let* ((swagger-json (swelter--get-swagger-json url))
+         (server-root (swelter--get-server-root-url-v2 swagger-json url)))
 
     ;; generated code will be output to a buffer
     (pop-to-buffer (concat client ".el"))
     (erase-buffer)
     (emacs-lisp-mode)
 
-    ;; TODO account for host and basePath
     (print
      `(defvar ,(intern  (format "%s-api-version" client)) ,(map-nested-elt swagger-json '("info" "version")))
      (current-buffer))
@@ -37,10 +37,11 @@
           (-let [(http-verb . path-obj) http-verb-value]
             ;; TODO nil should print as ()?
             (cl-prettyprint (swelter--build-endpoint
-                    http-verb
-                    (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
-                    path
-                    path-obj))
+                             http-verb
+                             (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
+                             path
+                             path-obj
+                             server-root))
             (newline)))))
 
     (print
@@ -73,10 +74,22 @@ Throws if missing or not a valid json."
       ;; for version 2.0
       (map-elt swagger-json "swagger")))
 
-;; TODO can this be modified by the "servers" prop?
-(defun swelter--get-server-root-url (url)
-   "Gets the root url from the swagger URL."
-   (url-basepath url))
+(defun swelter--get-server-root-url-v2 (swagger-json url)
+   "Gets the root url from SWAGGER-JSON.
+URL is the original address of the swagger json, used for fallback."
+   ;; error if scheme is present and https is not
+   (when-let (schemes (map-elt swagger-json "schemes"))
+     (unless (seq-contains-p schemes "https")
+       (error (format "Swagger indicates only these protocols are supported: %s" schemes))))
+
+   (let* ((swagger-url (url-generic-parse-url url))
+          (scheme "https")
+          (default-host (concat (url-host swagger-url) (when (url-portspec swagger-url) (format ":%s" (url-port swagger-url)))))
+          (host (map-elt swagger-json "host" default-host))
+          (base-path (map-elt swagger-json "basePath" "")))
+     (when (equal "http" (url-type swagger-url))
+       (warn "Swagger url used HTTP, assuming HTTPS for client url"))
+     (concat scheme "://" host base-path)))
 
 (defun swelter--make-function-name (client-name http-verb path &optional operation-id)
   "Create a skewer-case function name roughly matching the API endpoint.
@@ -112,7 +125,7 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
     `(format ,format-string ,@params)))
 
 ;; TODO this is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
-(defun swelter--build-endpoint (http-verb function-name path obj)
+(defun swelter--build-endpoint (http-verb function-name path obj server-root)
   (-let* ((path-sexp (swelter--path-param-sexp path))
           (docstring (or (map-elt obj "summary")
                          (format "%s %s." http-verb path)))
@@ -156,7 +169,8 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
        ,docstring
        (let* ((url-request-method ,(upcase http-verb))
               ,@header-and-body
-              (res (url-retrieve-synchronously (concat server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
+              ;; TODO can simplify url when no parameters given to "format"
+              (res (url-retrieve-synchronously (concat ,server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
          (with-current-buffer res
            (goto-char (point-min))
            (while (looking-at "^.") (delete-line))
