@@ -1,4 +1,4 @@
-;;; swelter.el --- A swagger client generator.
+;;; swelter.el --- A swagger client generator.   -*- lexical-binding: t -*-
 
 ;;; Code:
 
