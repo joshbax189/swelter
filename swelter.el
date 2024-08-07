@@ -110,7 +110,7 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
     `(format ,format-string ,@params)))
 
 ;; TODO this is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
-(defun swelter--build-endpoint (http-verb name path obj)
+(defun swelter--build-endpoint (http-verb function-name path obj)
   (-let* ((path-sexp (swelter--path-param-sexp path))
           (docstring (or (map-elt obj "summary")
                          (format "%s %s." http-verb path)))
@@ -150,7 +150,7 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
    ;; responses
    ;; security
 
-    `(defun ,name ,params
+    `(defun ,function-name ,params
        ,docstring
        (let* ((url-request-method ,(upcase http-verb))
               ,@header-and-body
