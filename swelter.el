@@ -34,18 +34,16 @@
         (dolist (http-verb-value (map-pairs endpoint-obj))
           (-let [(http-verb . path-obj) http-verb-value]
             ;; TODO nil should print as ()?
-            (print (swelter--build-endpoint
+            (cl-prettyprint (swelter--build-endpoint
                     http-verb
                     (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
                     path
-                    path-obj)
-                   (current-buffer))
-            ))))
+                    path-obj))
+            (newline)))))
 
     (print
      `(provide (quote ,(intern client)))
      (current-buffer))
-    ;; TODO format the buffer
     )
 
     ;; also
