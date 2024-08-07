@@ -26,7 +26,9 @@
      `(defvar ,(intern  (format "%s-api-version" client)) ,(map-nested-elt swagger-json '("info" "version")))
      (current-buffer))
 
-    ;; TODO set root server path
+    (print
+     `(defvar ,(intern  (format "%s-swagger-url" client)) ,url)
+     (current-buffer))
 
     (dolist (path-value (map-pairs (map-elt swagger-json "paths")))
       (-let [(path . endpoint-obj) path-value]
