@@ -10,20 +10,16 @@
 ;; NOTE this is made for Swagger v2 for now
 ;; one difference is body replaced
 
-(defcustom swelter-client-dir "~/.swelter-clients"
-  "Where to store generated clients."
-  :type 'string)
-
 (defun swelter-generate (url client)
   "Generate CLIENT from swagger file at URL."
   (interactive)
   ;; download file and convert
   (let ((swagger-json (swelter--get-swagger-json url)))
-    ;; create client dir
-    (make-directory (concat swelter-client-dir "/" client) 't)
 
-    ;; TODO don't open but oh well
-    (find-file (concat swelter-client-dir "/" client "/" "my-foo-client.el"))
+    ;; generated code will be output to a buffer
+    (pop-to-buffer (concat client ".el"))
+    (erase-buffer)
+    (emacs-lisp-mode)
 
     ;; TODO account for host and basePath
     (print
@@ -44,7 +40,13 @@
                     path
                     path-obj)
                    (current-buffer))
-            )))))
+            ))))
+
+    (print
+     `(provide (quote ,(intern client)))
+     (current-buffer))
+    ;; TODO format the buffer
+    )
 
     ;; also
     ;; - info
