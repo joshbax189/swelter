@@ -91,6 +91,37 @@ URL is the original address of the swagger json, used for fallback."
        (warn "Swagger url used HTTP, assuming HTTPS for client url"))
      (concat scheme "://" host base-path)))
 
+(defun swelter--oauth-login (url client-id &optional scope state)
+  "Login using auth code flow"
+ (let* ((redirect-uri "http://localhost:8009/foo")
+        (url-query (url-build-query-string `(("response_type" "code")
+                                            ("client_id" ,client-id)
+                                            ("redirect_uri" ,redirect-uri)
+                                            ("scope" ,scope)
+                                            ("state" ,state))))
+        (full-url (concat url "/authorize?" url-query))
+        (cb (lambda (httpcon)
+              (message "ok")
+              (message "%s" (elnode-http-method httpcon))
+              (let ((code (assoc "code" (elnode-http-params httpcon))))
+                (when code
+                  (message "get token")
+                  (let ((url-request-method "POST")
+                        (url-request-data (url-build-query-string `(("grant_type" "authorization_code")
+                                                                    ("code" ,(cdr code))
+                                                                    ("client_id" ,client-id))))
+                        (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))
+                        (the-url (concat url "/token")))
+                    (url-retrieve the-url
+                                  (lambda (_s) (message (buffer-string)))))))
+              ;; TODO state
+              (elnode-http-start httpcon 200)
+              (elnode-http-return httpcon))))
+   (elnode-start cb :port 8009)
+   (browse-url full-url))
+ ;; TODO close connection
+  )
+
 (defun swelter--make-function-name (client-name http-verb path &optional operation-id)
   "Create a skewer-case function name roughly matching the API endpoint.
 
