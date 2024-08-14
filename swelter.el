@@ -2,7 +2,6 @@
 
 ;;; Code:
 
-;; is this the best choice?
 (require 'url)
 (require 'dash)
 (require 's)
@@ -175,16 +174,12 @@ Assumes CLIENT-NAME is already skewer-case, and PATH does not include any http:/
       (format "%s-%s-%s" client-name http-verb path-skewer))))
 
 (defun swelter--path-param-sexp (path)
-  "Convert PATH to a s-exp over parameters.
+  "Convert path template PATH to a s-exp over parameters.
 
 E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
-  ;; TODO the path params might have names that are captured, maybe give them a prefix?
-  ;; TODO assumes path is absolute
-
   (let* ((parts (string-split path "/{\\|}" t))
          (params (-map #'intern (--filter (not (string-prefix-p "/" it)) parts)))
          (format-string (replace-regexp-in-string "{[^}]+}" "%s" path)))
-
     `(format ,format-string ,@params)))
 
 ;; TODO this is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
