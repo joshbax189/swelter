@@ -7,6 +7,7 @@
 (require 'dash)
 (require 's)
 (require 'oauth2)
+(require 'cl-lib)
 
 ;; NOTE this is made for Swagger v2 for now
 ;; one difference is body replaced
@@ -106,12 +107,26 @@ URL is the original address of the swagger json, used for fallback."
       (cl-incf port))
     port))
 
+(defun swelter--oauth-make-state-string (&optional result-length)
+  "Generate a random alpha-num string of length RESULT-LENGTH."
+  (let ((res))
+   (dotimes (_x (or result-length 20))
+     (let ((rand-val (+ (cl-random 74) 48)))
+       ;; skip symbols
+       (when (or (and (>= rand-val 58)
+                   (> 65 rand-val))
+                 (and (>= rand-val 91)
+                      (> 97 rand-val)))
+         (setq rand-val (+ 10 rand-val)))
+       (push rand-val res)))
+   (apply #'string res)))
+
 (defun swelter--oauth-code-flow (auth-url token-url client-id client-secret &optional scope)
   "Login using auth code flow."
   ;; TODO can it use https?
   (let* ((port (swelter--find-available-port 8000))
          (redirect-uri (format "http://localhost:%s/foo" port))
-         (state "aaaaaa") ;; TODO state should be generated
+         (state (swelter--oauth-make-state-string))
          (query `(("response_type" "code")
                   ("client_id" ,client-id)
                   ("redirect_uri" ,redirect-uri)
