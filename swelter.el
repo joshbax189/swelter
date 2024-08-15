@@ -23,6 +23,10 @@
     (erase-buffer)
     (emacs-lisp-mode)
 
+    (dolist (x '((require 'url)
+                 (require 'json)))
+      (print x (current-buffer)))
+
     (print
      `(defvar ,(intern  (format "%s-api-version" client)) ,(map-nested-elt swagger-json '("info" "version")))
      (current-buffer))
