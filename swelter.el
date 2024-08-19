@@ -380,24 +380,27 @@ Returns nil, if SCOPE-OBJ is nil.  The result is not url encoded."
 
 CLIENT-NAME string name of client package.
 SECURITY-DEFINITIONS alist mapping security method names to generating functions."
-  `(defun ,(make-symbol (concat client-name "-authorize")) (security-obj)
-     "Return a list of security headers satisfying SECURITY-OBJ."
-     (let ((security-definitions ',security-definitions))
-       (cl-block nil
-         ;; try each auth method in turn
-         (dolist (auth-method-obj (seq--into-list security-obj))
-           ;; each one must produce a header
-           (let* ((auth-methods-alist (map-pairs auth-method-obj))
-                  (sec-headers (map-apply
-                                (lambda (auth-method scopes)
-                                  ;; TODO: what if these are not required/present?
-                                  (let ((client-id ',(make-symbol (concat client-name "-client-id")))
-                                        (client-secret ',(make-symbol (concat client-name "-client-secret")))
-                                        (api-key ',(make-symbol (concat client-name "-api-key"))))
-                                    (eval (map-elt security-definitions auth-method))))
-                                auth-methods-alist)))
-             (when (and sec-headers) ;; all non-nil
-               (cl-return sec-headers)))))))
+  (let ((client-id-symbol (make-symbol (concat client-name "-client-id")))
+        (client-secret-symbol (make-symbol (concat client-name "-client-secret")))
+        (api-key-symbol (make-symbol (concat client-name "-api-key"))))
+
+   `(defun ,(make-symbol (concat client-name "-authorize")) (security-obj)
+      "Return a list of security headers satisfying SECURITY-OBJ."
+      (let ((security-definitions ',security-definitions))
+        (cl-block nil
+          ;; try each auth method in turn
+          (dolist (auth-method-obj (seq--into-list security-obj))
+            ;; each one must produce a header
+            (let* ((auth-methods-alist (map-pairs auth-method-obj))
+                   (sec-headers (map-apply
+                                 (lambda (auth-method scope)
+                                   (let ((client-id     (and (boundp ',client-id-symbol) ,client-id-symbol))
+                                         (client-secret (and (boundp ',client-secret-symbol) ,client-secret-symbol))
+                                         (api-key       (and (boundp ',api-key-symbol) ,api-key-symbol)))
+                                     (eval (map-elt security-definitions auth-method))))
+                                 auth-methods-alist)))
+              (when (and sec-headers) ;; all non-nil
+                (cl-return sec-headers))))))))
   )
 
 (defun swelter--make-function-name (client-name http-verb path &optional operation-id)
