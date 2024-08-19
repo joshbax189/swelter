@@ -7,6 +7,7 @@
 (require 's)
 (require 'oauth2)
 (require 'cl-lib)
+(require 'aio)
 
 ;; NOTE this is made for Swagger v2 for now
 ;; one difference is body replaced
@@ -24,7 +25,8 @@
     (emacs-lisp-mode)
 
     (dolist (x '((require 'url)
-                 (require 'json)))
+                 (require 'json)
+                 (require 'aio)))
       (print x (current-buffer)))
 
     (print
@@ -204,7 +206,8 @@ URL is the original address of the swagger json, used for fallback."
 (defun swelter--oauth-code-flow (auth-url token-url client-id client-secret &optional scope)
   "Login using auth code flow."
   ;; TODO can it use https?
-  (let* ((port (swelter--find-available-port 8000))
+  (let* ((promise (aio-promise))
+         (port (swelter--find-available-port 8000))
          (redirect-uri (format "http://localhost:%s/foo" port))
          (state (swelter--oauth-make-state-string))
          (query `(("response_type" "code")
@@ -223,15 +226,17 @@ URL is the original address of the swagger json, used for fallback."
                    (elnode-send-400 httpcon))
                  (message "get token")
                  ;; closure: token-url, client-id, client-secret, redirect-uri
-                 (print (oauth2-request-access token-url client-id client-secret (cdr code) redirect-uri)))
-               ;; TODO store token cf oauth2-auth-and-store
-               ;; TODO how to inject token into correct calls?
+                 (let ((token (oauth2-request-access token-url client-id client-secret (cdr code) redirect-uri)))
+                   ;; TODO store token cf oauth2-auth-and-store
+                   (message "token retrieved")
+                   (aio-resolve promise (lambda () (oauth2-token-access-token token)))))
                (elnode-http-start httpcon 200)
                (elnode-http-return httpcon)
                (elnode-stop port))))
-    (elnode-start cb :port port)
-    ;; TODO close after timeout too
-    (browse-url authorize-url)))
+    (prog1 promise
+     (elnode-start cb :port port)
+     ;; TODO close after timeout too
+     (browse-url authorize-url))))
 
 ;; FIXME: This will not work because elnode cannot read url fragments (they aren't sent out of the browser).
 ;;        In general, "implicit" is meant for browser apps and is deprecated, so find a way to not use this.
@@ -346,12 +351,12 @@ or nil if the auth method failed to produce a token."
              (cons "Authorization" )))
          ((equal oauth-flow "accessCode")
           `(-some->>
-               (swelter--oauth-code-flow
-                ,oauth-auth-url
-                ,(map-elt obj "tokenUrl")
-                client-id
-                client-secret
-                (or scope ,oauth-provided-scopes))
+               (aio-wait-for (swelter--oauth-code-flow
+                              ,oauth-auth-url
+                              ,(map-elt obj "tokenUrl")
+                              client-id
+                              client-secret
+                              (or scope ,oauth-provided-scopes)))
              (format "Bearer %s" )
              (cons "Authorization" )))
          ('t
