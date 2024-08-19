@@ -439,27 +439,42 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
 
 ;; NOTE: This is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
 (defun swelter--build-endpoint (http-verb function-name path obj server-root global-security-obj client-name)
+  "Template a client function.
+
+HTTP-VERB e.g. \"get\" \"put\" etc
+FUNCTION-NAME full name of the function to generate
+PATH relative path of the endpoint from SERVER-ROOT
+OBJ the swagger object describing the endpoint
+SERVER-ROOT the overall root url
+GLOBAL-SECURITY-OBJ contains default auth methods for all endpoints
+CLIENT-NAME string name of the generated client to be used as a prefix"
   (-let* ((path-sexp (swelter--path-param-sexp path))
           (docstring (or (map-elt obj "summary")
                          (format "%s %s." http-verb path)))
-          (parameters (map-elt obj "parameters"))
-          ;; assume all path params required
-          ((&alist "path" path-params
-                   "query" query-params
+          ((&alist "path"     path-params
+                   "query"    query-params
                    "formData" form-params
-                   "body" body-params)
+                   "body"     body-params)
            (seq-group-by (lambda (x) (map-elt x "in"))
-                         parameters))
-          ((&alist 't query-params-req
-                   :false query-params-opt)
-           (seq-group-by (lambda (x) (map-elt x "required"))
+                         (map-elt obj "parameters")))
+          ;; for these "required" may be :false or nil
+          ((&alist 't  query-params-req
+                   nil query-params-opt)
+           (seq-group-by (lambda (x) (eq 't (map-elt x "required")))
                          query-params))
-          ((&alist 't form-params-req
-                   :false form-params-opt)
-           (seq-group-by (lambda (x) (map-elt x "required"))
+          ((&alist 't  form-params-req
+                   nil form-params-opt)
+           (seq-group-by (lambda (x) (eq 't (map-elt x "required")))
                          form-params))
-          (required-params (--map (make-symbol (map-elt it "name")) (append path-params query-params-req form-params-req body-params)))
-          (optional-params (--map (make-symbol (map-elt it "name")) (append query-params-opt form-params-opt)))
+          (required-params
+           (--map
+            (make-symbol (map-elt it "name"))
+            (append path-params query-params-req form-params-req body-params)))
+          (optional-params
+           (--map
+            (make-symbol (map-elt it "name"))
+            ;; assume all path params required
+            (append query-params-opt form-params-opt)))
           ;; function args
           (params `(,@required-params
                     ,@(when optional-params (cons '&optional optional-params))))
@@ -468,6 +483,7 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
           ;; build headers and body
           ;; TODO can body params be described individually?
           (_ (when (> (length body-params) 1) (error "Multiple parameters for body")))
+          ;; TODO body should be empty for GET requests
           (header-and-body (if body-params
                                ;; json
                                `((url-request-data (json-encode ,(make-symbol (map-elt (car body-params) "name"))))
