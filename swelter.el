@@ -405,16 +405,14 @@ Otherwise it is {CLIENT-NAME}-{HTTP-VERB}-{PATH} with path params removed.
 In both cases the result is transformed to skewer-case.
 
 Assumes CLIENT-NAME is already skewer-case, and PATH does not include any http:// prefix."
-
   (if operation-id
-      (let* ((op-name-lower (s-snake-case operation-id))
-             (op-name (string-replace "_" "-" op-name-lower)))
+      (let ((op-name (s-dashed-words operation-id)))
         (format "%s-%s" client-name op-name))
     ;; fallback to verb-path
     (let* ((path-words (string-split path "/" 't))
            (path-clean (--filter (not (string-prefix-p "{" it)) path-words))
-           (path-lower (-map #'s-snake-case path-clean))
-           (path-skewer (string-replace "_" "-" (string-join path-lower "-"))))
+           (path-parts (-map #'s-dashed-words path-clean))
+           (path-skewer (string-join path-parts "-")))
       (format "%s-%s-%s" client-name http-verb path-skewer))))
 
 (defun swelter--path-param-sexp (path)
