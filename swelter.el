@@ -212,7 +212,7 @@ URL is the original address of the swagger json, used for fallback."
                   ("redirect_uri" ,redirect-uri)
                   ("state" ,state)))
          (query (if scope
-                    (append query `("scope" ,scope))
+                    (append query `(("scope" ,(swelter--swagger-oauth-scopes-to-string scope))))
                   query))
          (authorize-url (concat auth-url "?" (url-build-query-string query)))
          (cb (lambda (httpcon)
