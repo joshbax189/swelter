@@ -304,7 +304,7 @@ or nil if the auth method failed to produce a token."
     (cond
      ((equal method-type "basic")
       ;; free var: server-root
-      '(-some->> (url-basic-auth server-root 't 't) (list "Authorization")))
+      '(-some->> (url-basic-auth server-root 't 't) (cons "Authorization")))
 
      ((equal method-type "apiKey")
       ;; free var: api-key
@@ -333,17 +333,17 @@ or nil if the auth method failed to produce a token."
           `(-some->>
                (swelter--oauth-implicit-flow ,oauth-auth-url client-id client-secret (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
-             (list "Authorization" )))
+             (cons "Authorization" )))
          ((equal oauth-flow "password")
           `(-some->>
                (swelter--oauth-password-flow ,oauth-auth-url client-id client-secret (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
-             (list "Authorization" )))
+             (cons "Authorization" )))
          ((equal oauth-flow "application")
           `(-some->>
                (swelter--oauth-application-flow ,oauth-auth-url client-id client-secret (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
-             (list "Authorization" )))
+             (cons "Authorization" )))
          ((equal oauth-flow "accessCode")
           `(-some->>
                (swelter--oauth-code-flow
@@ -353,7 +353,7 @@ or nil if the auth method failed to produce a token."
                 client-secret
                 (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
-             (list "Authorization" )))
+             (cons "Authorization" )))
          ('t
           ;; Not an error as there might be other available methods
           (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
