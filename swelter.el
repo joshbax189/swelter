@@ -61,15 +61,7 @@
 
     (print
      `(provide (quote ,(intern client)))
-     (current-buffer))
-    )
-
-  ;; also
-  ;; - info
-  ;; - tags
-  ;; - servers
-
-  )
+     (current-buffer))))
 
 (defun swelter--fix-json-big-int ()
   "Wrap long ints in strings to make valid JSON.
@@ -107,8 +99,6 @@ References are resolved in ROOT-OBJ."
         nil)
     json-obj))
 
-
-
 (defun swelter--replace-all-json-refs (json-obj &optional root-obj)
   "Given parsed JSON-OBJ expand any $ref.
 
@@ -142,8 +132,7 @@ Throws if missing or not a valid json."
          (result (swelter--replace-all-json-refs swagger-json)))
     (with-current-buffer (get-buffer-create "*swelter-debug*")
       (cl-prettyprint result))
-    result
-    ))
+    result))
 
 (defun swelter--get-swagger-version (swagger-json)
   "Return version string of SWAGGER-JSON.  Nil if not a swagger file."
