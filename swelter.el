@@ -480,17 +480,19 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
                     ,@(when optional-params (cons '&optional optional-params))))
           (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params))
           (build-form-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) form-params))
+          ;; TODO add sanity check warnings, e.g. path params missing from path, cf strava-update-logged-in-athlete
           ;; build headers and body
           ;; TODO can body params be described individually?
           (_ (when (> (length body-params) 1) (error "Multiple parameters for body")))
-          ;; TODO body should be empty for GET requests
-          (header-and-body (if body-params
-                               ;; json
-                               `((url-request-data (json-encode ,(make-symbol (map-elt (car body-params) "name"))))
-                                 (url-request-extra-headers '(("Content-Type" . "application/json"))))
-                             ;; form
-                             `((url-request-data (url-build-query-string (list ,@build-form-string-arg)))
-                               (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded"))))))
+          (header-and-body (cond
+                            (body-params ;; json
+                             `((url-request-data (json-encode ,(make-symbol (map-elt (car body-params) "name"))))
+                               (url-request-extra-headers '(("Content-Type" . "application/json")))))
+                             (form-params ;; form-data
+                              `((url-request-data (url-build-query-string (list ,@build-form-string-arg)))
+                                (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))))
+                             ;; empty body
+                             ('t '((url-request-extra-headers nil)))))
           ;; security
           (security-obj (or (map-elt obj "security") global-security-obj)) ;; an array
           (authorize-function (make-symbol (concat client-name "-authorize")))
