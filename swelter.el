@@ -69,18 +69,20 @@
      (current-buffer))))
 
 (defun swelter--fix-json-big-int ()
-  "Wrap long ints in strings to make valid JSON.
+  "Wrap long ints in string quotes to make valid JSON.
 
 This applies to the current buffer.
 
 Rationale is:
-- literal integers in Swagger JSON are probably just examples
+- literal integers in Swagger JSON are probably within example responses
 - these are probably just typos"
-  ;; Naughty JS developers write bad JSON, fix it
+  ;; Naughty JS developers write bad JSON... fix it
+  ;; Although JSON spec says "should be doubles" and IEEE-754 says up to 16 digits in significand
+  ;; emacs' json-parse warns after about 19 digits
   (save-excursion
-   (save-match-data
-     (while (re-search-forward "[[:space:]]\\([0-9]\\{19\\}[0-9]*\\)" nil 't)
-       (replace-match "\"\\1\"")))))
+    (save-match-data
+      (while (re-search-forward "[[:space:]]\\([0-9]\\{19\\}[0-9]*\\)" nil 't)
+        (replace-match "\"\\1\"")))))
 
 (defun swelter--resolve-json-ref (path root-obj)
   "Lookup JSON pointer PATH in ROOT-OBJ.
