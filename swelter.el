@@ -231,19 +231,29 @@ URL is the original address of the swagger json, used for fallback."
                  (unless (equal state
                                 (cdr (assoc "state" (elnode-http-params httpcon))))
                    (warn "OAuth state invalid")
-                   (elnode-send-400 httpcon))
+                   (elnode-send-400 httpcon)
+                   (elnode-stop port)
+                   (aio-resolve promise (lambda () (error "OAuth state error"))))
+
                  (message "get token")
                  ;; closure: token-url, client-id, client-secret, redirect-uri
                  (let ((token (oauth2-request-access token-url client-id client-secret (cdr code) redirect-uri)))
                    ;; TODO store token cf oauth2-auth-and-store
                    (message "token retrieved")
                    (aio-resolve promise (lambda () (oauth2-token-access-token token)))))
-               (elnode-http-start httpcon 200)
-               (elnode-http-return httpcon)
+               (elnode-http-start httpcon 200 '("Content-type" . "text/html"))
+               (elnode-http-return httpcon "<html><p>Token retrieved, you can close this window now.</p></html>")
                (elnode-stop port))))
     (prog1 promise
      (elnode-start cb :port port)
-     ;; TODO close after timeout too
+     ;; cleanup elnode listener after 4m
+     (run-at-time 240 nil
+                  (lambda ()
+                    (when (seq-contains-p (elnode-ports) port)
+                      (message "shutting down http://localhost:%s" port)
+                      (elnode-stop port)
+                      (unless (aio-result promise)
+                        (aio-resolve promise (lambda () (error "No response to OAuth login attempt")))))))
      (browse-url authorize-url))))
 
 ;; FIXME: This will not work because elnode cannot read url fragments (they aren't sent out of the browser).
