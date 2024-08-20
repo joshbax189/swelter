@@ -41,7 +41,12 @@
           (global-security-obj (map-elt swagger-json "security")))
 
       (cl-prettyprint
+       (swelter--build-version-check-function client))
+      (newline)
+
+      (cl-prettyprint
        (swelter--build-authorize-function client security-definitions))
+      (newline)
 
       (dolist (path-value (map-pairs (map-elt swagger-json "paths")))
         (-let [(path . endpoint-obj) path-value]
@@ -395,6 +400,19 @@ SECURITY-DEFINITIONS alist mapping security method names to generating functions
                                  auth-methods-alist)))
               (when (and sec-headers) ;; all non-nil
                 (cl-return sec-headers))))))))
+  )
+
+(defun swelter--build-version-check-function (client-name)
+  "Template for client version check.
+
+CLIENT-NAME string name of client package."
+  `(defun ,(make-symbol (concat client-name "-api-version-check")) ()
+      "Signals if client version does not match original Swagger file."
+      (let* ((swagger-json (swelter--get-swagger-json ,(make-symbol (concat client-name "-swagger-url"))))
+             (upstream-version (map-nested-elt swagger-json '("info" "version"))))
+        (unless (equal upstream-version ,(make-symbol (concat client-name "-api-version")))
+          (error (format "API version %s did not match client version %s" upstream-version ,(make-symbol (concat client-name "-api-version")))))
+        't))
   )
 
 (defun swelter--make-function-name (client-name http-verb path &optional operation-id)
