@@ -83,12 +83,24 @@ Rationale is:
        (replace-match "\"\\1\"")))))
 
 (defun swelter--resolve-json-ref (path root-obj)
-  "Lookup JSON pointer PATH in ROOT-OBJ."
+  "Lookup JSON pointer PATH in ROOT-OBJ.
+
+Returns nil if node is not found."
   (let* ((clean-path (string-remove-prefix "#/" path))
          (path-components (string-split clean-path "/"))
          (current-loc root-obj))
-    (while path-components
-      (setq current-loc (map-elt current-loc (car path-components)))
+    (while-let ((current-token (car path-components)))
+      ;; map-elt allows indexing into strings, but JSON pointer does not
+      ;; return nil in that case
+      (when (stringp current-loc)
+        (setq current-loc nil))
+      ;; vectors must be indexed with numbers
+      (if (and (vectorp current-loc)
+               ;; because (string-to-number "foo") is 0
+               (string-match-p "[0-9]+" current-token))
+          (setq current-loc (map-elt current-loc (string-to-number current-token)))
+        ;; else treat current-token as a string
+        (setq current-loc (map-elt current-loc current-token)))
       (setq path-components (cdr path-components)))
     current-loc))
 
