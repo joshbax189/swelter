@@ -327,7 +327,7 @@ or nil if the auth method failed to produce a token."
     (cond
      ((equal method-type "basic")
       ;; free var: server-root
-      '(-some->> (url-basic-auth server-root 't 't) (cons "Authorization")))
+      '(-some->> (url-basic-auth server-root 't) (cons "Authorization")))
 
      ((equal method-type "apiKey")
       ;; free var: api-key
