@@ -45,7 +45,7 @@
       (newline)
 
       (cl-prettyprint
-       (swelter--build-authorize-function client security-definitions))
+       (swelter--build-authorize-function client security-definitions server-root))
       (newline)
 
       (dolist (path-value (map-pairs (map-elt swagger-json "paths")))
@@ -398,7 +398,7 @@ Returns nil, if SCOPE-OBJ is nil.  The result is not url encoded."
    ((mapp scope-obj)
     (funcall #'string-join (map-keys scope-obj) " "))))
 
-(defun swelter--build-authorize-function (client-name security-definitions)
+(defun swelter--build-authorize-function (client-name security-definitions server-root)
   "Template for authorization function.
 
 CLIENT-NAME string name of client package.
@@ -417,10 +417,12 @@ SECURITY-DEFINITIONS alist mapping security method names to generating functions
             (let* ((auth-methods-alist (map-pairs auth-method-obj))
                    (sec-headers (map-apply
                                  (lambda (auth-method scope)
-                                   (let ((client-id     (and (boundp ',client-id-symbol) ,client-id-symbol))
-                                         (client-secret (and (boundp ',client-secret-symbol) ,client-secret-symbol))
-                                         (api-key       (and (boundp ',api-key-symbol) ,api-key-symbol)))
-                                     (eval (map-elt security-definitions auth-method))))
+                                   (eval (map-elt security-definitions auth-method)
+                                         (list
+                                          (cons 'client-id     (and (boundp ',client-id-symbol) ,client-id-symbol))
+                                          (cons 'client-secret (and (boundp ',client-secret-symbol) ,client-secret-symbol))
+                                          (cons 'api-key       (and (boundp ',api-key-symbol) ,api-key-symbol))
+                                          (cons 'server-root   ,server-root))))
                                  auth-methods-alist)))
               (when (and sec-headers) ;; all non-nil
                 (cl-return sec-headers))))))))
