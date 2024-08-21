@@ -162,19 +162,21 @@ Throws if missing or not a valid json."
 (defun swelter--get-server-root-url-v2 (swagger-json url)
    "Gets the root url from SWAGGER-JSON.
 URL is the original address of the swagger json, used for fallback."
-   ;; error if scheme is present and https is not
+   ;; warn if scheme is present and https is not
    (when-let (schemes (map-elt swagger-json "schemes"))
      (unless (seq-contains-p schemes "https")
-       (error (format "Swagger indicates only these protocols are supported: %s" schemes))))
+       (warn (format "Swagger indicates only these protocols are supported: %s" schemes))))
 
    (let* ((swagger-url (url-generic-parse-url url))
           (scheme "https")
           (default-host (concat (url-host swagger-url) (when (url-portspec swagger-url) (format ":%s" (url-port swagger-url)))))
-          (host (map-elt swagger-json "host" default-host))
+          (host (map-elt swagger-json "host"))
           (base-path (map-elt swagger-json "basePath" "")))
+     (unless host
+       (warn (format "Swagger host not present, using default host %s from Swagger url" default-host)))
      (when (equal "http" (url-type swagger-url))
        (warn "Swagger url used HTTP, assuming HTTPS for client url"))
-     (concat scheme "://" host base-path)))
+     (concat scheme "://" (or host default-host) base-path)))
 
 (defun swelter--get-security-definitions (obj)
   "Convert a securityDefinitions OBJ to an alist of name to extra query or headers."
