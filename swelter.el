@@ -250,9 +250,10 @@ URL is the original address of the swagger json, used for fallback."
        (push rand-val res)))
    (apply #'string res)))
 
-(defun swelter--oauth-code-flow (auth-url token-url client-id client-secret &optional scope)
+(cl-defun swelter--oauth-code-flow (&key auth-url token-url client-id client-secret scope &allow-other-keys)
   "Login using auth code flow."
   ;; TODO can it use https?
+  ;; network-stream.el can, could make a simple elnode replacement that just reads the HTTP message
   (let* ((promise (aio-promise))
          (port (swelter--find-available-port 8000))
          (redirect-uri (format "http://localhost:%s/foo" port))
@@ -284,24 +285,24 @@ URL is the original address of the swagger json, used for fallback."
                (elnode-http-return httpcon "<html><p>Token retrieved, you can close this window now.</p></html>")
                (elnode-stop port))))
     (prog1 promise
-     (elnode-start cb :port port)
-     ;; cleanup elnode listener after 4m
-     (run-at-time 240 nil
-                  (lambda ()
-                    (when (seq-contains-p (elnode-ports) port)
-                      (message "shutting down http://localhost:%s" port)
-                      (elnode-stop port)
-                      (unless (aio-result promise)
-                        (aio-resolve promise (lambda () (error "No response to OAuth login attempt")))))))
-     (browse-url authorize-url))))
+      (elnode-start cb :port port)
+      ;; cleanup elnode listener after 4m
+      (run-at-time 240 nil
+                   (lambda ()
+                     (when (seq-contains-p (elnode-ports) port)
+                       (message "shutting down http://localhost:%s" port)
+                       (elnode-stop port)
+                       (unless (aio-result promise)
+                         (aio-resolve promise (lambda () (error "No response to OAuth login attempt")))))))
+      (browse-url authorize-url))))
 
 ;; FIXME: This will not work because elnode cannot read url fragments (they aren't sent out of the browser).
 ;;        In general, "implicit" is meant for browser apps and is deprecated, so find a way to not use this.
-(defun swelter--oauth-implicit-flow (auth-url client-id &optional scope)
+(cl-defun swelter--oauth-implicit-flow (&key auth-url client-id scope &allow-other-keys)
   "Login using implicit grant flow. Deprecated."
   (error "Implicit flow is not supported"))
 
-(defun swelter--oauth-password-flow (url client-id &optional client-secret scope)
+(cl-defun swelter--oauth-password-flow (&key auth-url client-id client-secret scope &allow-other-keys)
   "Auth using password. Deprecated.
 
 CLIENT-SECRET If the application is a “confidential client” (not a mobile or JavaScript app), then the secret is included as well.
@@ -323,13 +324,13 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                         (`("scope" ,scope) . form-data)
                       form-data))
          (url-request-data (url-build-query-string form-data)))
-    (url-retrieve-synchronously url
+    (url-retrieve-synchronously auth-url
                                 (lambda (_s)
                                   (goto-char (point-min))
                                   (while (looking-at "^.") (delete-line))
                                   (json-parse-buffer)))))
 
-(defun swelter--oauth-application-flow (url client-id client-secret &optional scope)
+(cl-defun swelter--oauth-application-flow (&key auth-url client-id client-secret scope &allow-other-keys)
   "Auth using client secret. Also called \"client credentials\" flow.
 
 CLIENT-SECRET If the application is a “confidential client” (not a mobile or JavaScript app), then the secret is included as well.
@@ -343,7 +344,7 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                         (`("scope" ,scope) . form-data)
                       form-data))
          (url-request-data (url-build-query-string form-data)))
-    (url-retrieve-synchronously url
+    (url-retrieve-synchronously auth-url
                                 (lambda (_s)
                                   (goto-char (point-min))
                                   (while (looking-at "^.") (delete-line))
@@ -393,27 +394,39 @@ or nil if the auth method failed to produce a token."
          (;; FIXME: included to support the petstore example, but should be removed later
           (equal oauth-flow "implicit")
           `(-some->>
-               (swelter--oauth-implicit-flow ,oauth-auth-url client-id client-secret (or scope ,oauth-provided-scopes))
+               (swelter--oauth-implicit-flow
+                :auth-url ,oauth-auth-url
+                :client-id client-id
+                :client-secret client-secret
+                :scope (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
              (cons "Authorization" )))
          ((equal oauth-flow "password")
           `(-some->>
-               (swelter--oauth-password-flow ,oauth-auth-url client-id client-secret (or scope ,oauth-provided-scopes))
+               (swelter--oauth-password-flow
+                :auth-url ,oauth-auth-url
+                :client-id client-id
+                :client-secret client-secret
+                :scope (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
              (cons "Authorization" )))
          ((equal oauth-flow "application")
           `(-some->>
-               (swelter--oauth-application-flow ,oauth-auth-url client-id client-secret (or scope ,oauth-provided-scopes))
+               (swelter--oauth-application-flow
+                :auth-url ,oauth-auth-url
+                :client-id client-id
+                :client-secret client-secret
+                :scope (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
              (cons "Authorization" )))
          ((equal oauth-flow "accessCode")
           `(-some->>
                (aio-wait-for (swelter--oauth-code-flow
-                              ,oauth-auth-url
-                              ,(map-elt obj "tokenUrl")
-                              client-id
-                              client-secret
-                              (or scope ,oauth-provided-scopes)))
+                              :auth-url ,oauth-auth-url
+                              :token-url ,(map-elt obj "tokenUrl")
+                              :client-id client-id
+                              :client-secret client-secret
+                              :scope (or scope ,oauth-provided-scopes)))
              (format "Bearer %s" )
              (cons "Authorization" )))
          ('t
