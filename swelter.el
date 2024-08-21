@@ -280,7 +280,8 @@ URL is the original address of the swagger json, used for fallback."
                  (let ((token (oauth2-request-access token-url client-id client-secret (cdr code) redirect-uri)))
                    ;; TODO store token cf oauth2-auth-and-store
                    (message "token retrieved")
-                   (aio-resolve promise (lambda () (oauth2-token-access-token token)))))
+                   (print token)
+                   (aio-resolve promise (lambda () token))))
                (elnode-http-start httpcon 200 '("Content-type" . "text/html"))
                (elnode-http-return httpcon "<html><p>Token retrieved, you can close this window now.</p></html>")
                (elnode-stop port))))
@@ -327,7 +328,13 @@ SCOPE If the application is requesting a token with limited scope, it should pro
     (with-current-buffer (url-retrieve-synchronously auth-url)
       (goto-char (point-min))
       (while (looking-at "^.") (delete-line))
-      (map-elt (json-parse-buffer) "access_token"))))
+      (let ((result (json-parse-buffer)))
+        (make-oauth2-token
+         :client-id client-id
+         :client-secret client-secret
+         :access-token (map-elt result "access_token")
+         :refresh-token (map-elt result "refresh_token")
+         :access-response result)))))
 
 (cl-defun swelter--oauth-application-flow (&key auth-url client-id client-secret scope &allow-other-keys)
   "Auth using client secret. Also called \"client credentials\" flow.
@@ -346,7 +353,13 @@ SCOPE If the application is requesting a token with limited scope, it should pro
     (with-current-buffer (url-retrieve-synchronously auth-url)
       (goto-char (point-min))
       (while (looking-at "^.") (delete-line))
-      (map-elt (json-parse-buffer) "access_token"))))
+      (let ((result (json-parse-buffer)))
+        (make-oauth2-token
+         :client-id client-id
+         :client-secret client-secret
+         :access-token (map-elt result "access_token")
+         :refresh-token (map-elt result "refresh_token")
+         :access-response result)))))
 
 
 (defun swelter--build-security-method-v2 (obj)
@@ -392,7 +405,8 @@ or nil if the auth method failed to produce a token."
                 :client-secret client-secret
                 :scope (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
-             (cons "Authorization" )))
+             (cons "Authorization" )
+             oauth2-token-access-token))
          ((equal oauth-flow "password")
           `(-some->>
                (swelter--oauth-password-flow
@@ -401,7 +415,8 @@ or nil if the auth method failed to produce a token."
                 :client-secret client-secret
                 :scope (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
-             (cons "Authorization" )))
+             (cons "Authorization" )
+             oauth2-token-access-token))
          ((equal oauth-flow "application")
           `(-some->>
                (swelter--oauth-application-flow
@@ -420,7 +435,8 @@ or nil if the auth method failed to produce a token."
                               :client-secret client-secret
                               :scope (or scope ,oauth-provided-scopes)))
              (format "Bearer %s" )
-             (cons "Authorization" )))
+             (cons "Authorization" )
+             oauth2-token-access-token))
          ('t
           ;; Not an error as there might be other available methods
           (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
