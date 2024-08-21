@@ -8,16 +8,53 @@
 (require 'oauth2)
 (require 'cl-lib)
 (require 'aio)
+(require 'yaml)
 
 ;; NOTE this is made for Swagger v2 for now
 ;; one difference is body replaced
 
-(defun swelter-generate (url client)
+(defun swelter-generate-from-url (client url)
   "Generate CLIENT from swagger file at URL."
   (interactive)
-  ;; download file and convert
-  (let* ((swagger-json (swelter--get-swagger-json url))
-         (server-root (swelter--get-server-root-url-v2 swagger-json url)))
+  (cond
+   ((string-suffix-p ".yaml" url)
+    (with-current-buffer (url-retrieve-synchronously url)
+      (goto-char (point-min))
+      (while (looking-at "^.") (delete-line))
+      (swelter-generate-from-yaml client nil url)))
+   ((string-suffix-p ".json" url)
+    (let ((swagger-obj (swelter--get-swagger-json url)))
+      (swelter-generate client swagger-obj url)))
+   ('t
+    (error "Could not determine Swagger file type"))))
+
+(defun swelter-generate-from-json (client &optional buffer-or-name url)
+  "Generate OpenAPI CLIENT from JSON in a buffer.
+
+BUFFER-OR-NAME contains the JSON, if nil uses `current-buffer'.
+URL fallback url if server is not specified in the swagger."
+  (interactive)
+  (with-current-buffer (or buffer-or-name (current-buffer))
+    (swelter--fix-json-big-int)
+    (let* ((swagger-obj (json-parse-buffer))
+           (swagger-obj (swelter--replace-all-json-refs swagger-obj)))
+      (swelter-generate client swagger-obj (or url "")))))
+
+(defun swelter-generate-from-yaml (client &optional buffer-or-name url)
+  "Generate OpenAPI CLIENT from YAML in a buffer.
+
+BUFFER-OR-NAME contains the YAML, if nil uses `current-buffer'.
+URL fallback url if server is not specified in the swagger."
+  (interactive)
+  (with-current-buffer (or buffer-or-name (current-buffer))
+    (let* ((buffer-string (buffer-substring-no-properties (point-min) (point-max)))
+           (swagger-obj (yaml-parse-string buffer-string :object-key-type 'string))
+           (swagger-obj (swelter--replace-all-json-refs swagger-obj)))
+      (swelter-generate client swagger-obj (or url "")))))
+
+(defun swelter-generate (client swagger-obj url)
+  "Generate CLIENT from parsed SWAGGER-OBJ originally at URL."
+  (let ((server-root (swelter--get-server-root-url-v2 swagger-obj url)))
 
     ;; generated code will be output to a buffer
     (pop-to-buffer (concat client ".el"))
@@ -30,15 +67,15 @@
       (print x (current-buffer)))
 
     (print
-     `(defvar ,(intern  (format "%s-api-version" client)) ,(map-nested-elt swagger-json '("info" "version")))
+     `(defvar ,(intern (format "%s-api-version" client)) ,(map-nested-elt swagger-obj '("info" "version")))
      (current-buffer))
 
     (print
-     `(defvar ,(intern  (format "%s-swagger-url" client)) ,url)
+     `(defvar ,(intern (format "%s-swagger-url" client)) ,url)
      (current-buffer))
 
-    (let ((security-definitions (swelter--get-security-definitions (map-elt swagger-json "securityDefinitions")))
-          (global-security-obj (map-elt swagger-json "security")))
+    (let ((security-definitions (swelter--get-security-definitions (map-elt swagger-obj "securityDefinitions")))
+          (global-security-obj (map-elt swagger-obj "security")))
 
       (cl-prettyprint
        (swelter--build-version-check-function client))
@@ -48,7 +85,7 @@
        (swelter--build-authorize-function client security-definitions server-root))
       (newline)
 
-      (dolist (path-value (map-pairs (map-elt swagger-json "paths")))
+      (dolist (path-value (map-pairs (map-elt swagger-obj "paths")))
         (-let [(path . endpoint-obj) path-value]
           ;; path is e.g. "/pet/{petId}"
           (dolist (http-verb-value (map-pairs endpoint-obj))
