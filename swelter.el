@@ -324,11 +324,10 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                         (`("scope" ,scope) . form-data)
                       form-data))
          (url-request-data (url-build-query-string form-data)))
-    (url-retrieve-synchronously auth-url
-                                (lambda (_s)
-                                  (goto-char (point-min))
-                                  (while (looking-at "^.") (delete-line))
-                                  (json-parse-buffer)))))
+    (with-current-buffer (url-retrieve-synchronously auth-url)
+      (goto-char (point-min))
+      (while (looking-at "^.") (delete-line))
+      (map-elt (json-parse-buffer) "access_token"))))
 
 (cl-defun swelter--oauth-application-flow (&key auth-url client-id client-secret scope &allow-other-keys)
   "Auth using client secret. Also called \"client credentials\" flow.
@@ -344,18 +343,11 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                         (`("scope" ,scope) . form-data)
                       form-data))
          (url-request-data (url-build-query-string form-data)))
-    (url-retrieve-synchronously auth-url
-                                (lambda (_s)
-                                  (goto-char (point-min))
-                                  (while (looking-at "^.") (delete-line))
-                                  (json-parse-buffer)))))
+    (with-current-buffer (url-retrieve-synchronously auth-url)
+      (goto-char (point-min))
+      (while (looking-at "^.") (delete-line))
+      (map-elt (json-parse-buffer) "access_token"))))
 
-;; oauth entrypoint should be like:
-;; - check stored token
-;; - if valid use it
-;; - else if expired use refresh
-;; - else renew
-;; if token is keyed by client-id and url should work ok
 
 (defun swelter--build-security-method-v2 (obj)
   "Construct a header generating function for a security definition OBJ.
