@@ -324,17 +324,21 @@ SCOPE If the application is requesting a token with limited scope, it should pro
          (form-data (if scope
                         (`("scope" ,scope) . form-data)
                       form-data))
-         (url-request-data (url-build-query-string form-data)))
-    (with-current-buffer (url-retrieve-synchronously auth-url)
-      (goto-char (point-min))
-      (while (looking-at "^.") (delete-line))
-      (let ((result (json-parse-buffer)))
-        (make-oauth2-token
-         :client-id client-id
-         :client-secret client-secret
-         :access-token (map-elt result "access_token")
-         :refresh-token (map-elt result "refresh_token")
-         :access-response result)))))
+         (url-request-data (url-build-query-string form-data))
+         (promise (aio-promise)))
+    (prog1 promise
+      (with-current-buffer (url-retrieve-synchronously auth-url)
+        (goto-char (point-min))
+        (while (looking-at "^.") (delete-line))
+        (let ((result (json-parse-buffer)))
+          (aio-resolve promise
+                       (lambda ()
+                         (make-oauth2-token
+                          :client-id client-id
+                          :client-secret client-secret
+                          :access-token (map-elt result "access_token")
+                          :refresh-token (map-elt result "refresh_token")
+                          :access-response result))))))))
 
 (cl-defun swelter--oauth-application-flow (&key auth-url client-id client-secret scope &allow-other-keys)
   "Auth using client secret. Also called \"client credentials\" flow.
@@ -349,17 +353,21 @@ SCOPE If the application is requesting a token with limited scope, it should pro
          (form-data (if scope
                         (`("scope" ,scope) . form-data)
                       form-data))
-         (url-request-data (url-build-query-string form-data)))
-    (with-current-buffer (url-retrieve-synchronously auth-url)
-      (goto-char (point-min))
-      (while (looking-at "^.") (delete-line))
-      (let ((result (json-parse-buffer)))
-        (make-oauth2-token
-         :client-id client-id
-         :client-secret client-secret
-         :access-token (map-elt result "access_token")
-         :refresh-token (map-elt result "refresh_token")
-         :access-response result)))))
+         (url-request-data (url-build-query-string form-data))
+         (promise (aio-promise)))
+    (prog1 promise
+      (with-current-buffer (url-retrieve-synchronously auth-url)
+        (goto-char (point-min))
+        (while (looking-at "^.") (delete-line))
+        (let ((result (json-parse-buffer)))
+          (aio-resolve promise
+                       (lambda ()
+                         (make-oauth2-token
+                          :client-id client-id
+                          :client-secret client-secret
+                          :access-token (map-elt result "access_token")
+                          :refresh-token (map-elt result "refresh_token")
+                          :access-response result))))))))
 
 
 (defun swelter--build-security-method-v2 (obj)
@@ -409,21 +417,21 @@ or nil if the auth method failed to produce a token."
              oauth2-token-access-token))
          ((equal oauth-flow "password")
           `(-some->>
-               (swelter--oauth-password-flow
-                :auth-url ,oauth-auth-url
-                :client-id client-id
-                :client-secret client-secret
-                :scope (or scope ,oauth-provided-scopes))
+               (aio-wait-for (swelter--oauth-password-flow
+                              :auth-url ,oauth-auth-url
+                              :client-id client-id
+                              :client-secret client-secret
+                              :scope (or scope ,oauth-provided-scopes)))
              (format "Bearer %s" )
              (cons "Authorization" )
              oauth2-token-access-token))
          ((equal oauth-flow "application")
           `(-some->>
-               (swelter--oauth-application-flow
-                :auth-url ,oauth-auth-url
-                :client-id client-id
-                :client-secret client-secret
-                :scope (or scope ,oauth-provided-scopes))
+               (aio-wait-for (swelter--oauth-application-flow
+                              :auth-url ,oauth-auth-url
+                              :client-id client-id
+                              :client-secret client-secret
+                              :scope (or scope ,oauth-provided-scopes)))
              (format "Bearer %s" )
              (cons "Authorization" )))
          ((equal oauth-flow "accessCode")
