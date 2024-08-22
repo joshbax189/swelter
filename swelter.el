@@ -9,6 +9,7 @@
 (require 'cl-lib)
 (require 'aio)
 (require 'yaml)
+(require 'plstore)
 
 ;; NOTE this is made for Swagger v2 for now
 ;; one difference is body replaced
@@ -369,6 +370,60 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                           :refresh-token (map-elt result "refresh_token")
                           :access-response result))))))))
 
+(defun swelter--get-stored-token (auth-url client-id &optional client-secret token-url)
+  "Get and rehydrate stored token for AUTH-URL and CLIENT-ID.
+
+Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
+  (let* ((plstore (plstore-open oauth2-token-file))
+         ;; NOTE: see oauth2-compute-id
+         (id (secure-hash 'md5 (concat auth-url client-id)))
+         (plist (cdr (plstore-get plstore id))))
+    (when plist
+      ;; TODO tokens created for the same domain but different methods will collide
+      ;;      Fix by creating new token struct
+      ;; TODO scope may differ, token may be expired
+      (message "got token from cache")
+      (make-oauth2-token :plstore plstore
+                         :plstore-id id
+                         :client-id client-id
+                         ;; TODO are both of these required?
+                         :client-secret client-secret
+                         :token-url token-url
+                         :access-token (plist-get plist :access-token)
+                         :refresh-token (plist-get plist :refresh-token)
+                         :access-response (plist-get plist :access-response)))))
+
+(defun swelter--store-token (token auth-url)
+  "Store TOKEN against AUTH-URL."
+  (let ((id (secure-hash 'md5 (concat auth-url (oauth2-token-client-id token))))
+        (plstore (plstore-open oauth2-token-file)))
+    ;; Set the plstore in the token
+    (setf (oauth2-token-plstore token) plstore)
+    (setf (oauth2-token-plstore-id token) id)
+    (plstore-put plstore id nil `(:access-token
+                                  ,(oauth2-token-access-token token)
+                                  :refresh-token
+                                  ,(oauth2-token-refresh-token token)
+                                  :access-response
+                                  ,(oauth2-token-access-response token)))
+    (plstore-save plstore)
+    token))
+
+(cl-defun swelter--oauth-with-store (method &key auth-url token-url client-id client-secret scope)
+ "Auth perhaps with a stored token."
+ (or (swelter--get-stored-token auth-url client-id
+                                client-secret
+                                token-url)
+     ;; TODO renew? IIRC only auth-code flow does refresh tokens
+     (swelter--store-token
+      (aio-wait-for
+       (funcall method
+                :auth-url auth-url
+                :token-url token-url
+                :client-id client-id
+                :client-secret client-secret
+                :scope scope))
+      auth-url)))
 
 (defun swelter--build-security-method-v2 (obj)
   "Construct a header generating function for a security definition OBJ.
@@ -392,8 +447,7 @@ or nil if the auth method failed to produce a token."
          ((equal key-location "query")
           ;; FIXME: the query param is roughly like `(,(map-elt "name") . api-key)
           (warn "Swelter does not support auth by query params")
-          nil
-          ))))
+          nil))))
 
      ((equal method-type "oauth2")
       ;; free var: client-id, client-secret, scope
@@ -403,52 +457,25 @@ or nil if the auth method failed to produce a token."
             ;;        So could intersect these to fail out of a method that doesn't provide those?
             (oauth-provided-scopes (swelter--swagger-oauth-scopes-to-string (map-elt obj "scopes")))
             (oauth-auth-url (map-elt obj "authorizationUrl")))
-        (cond
-         (;; FIXME: included to support the petstore example, but should be removed later
-          (equal oauth-flow "implicit")
-          `(-some->>
-               (swelter--oauth-implicit-flow
+        `(-some->>
+               (swelter--oauth-with-store
+                ,(cond
+                  ((equal oauth-flow "implicit") #'swelter--oauth-implicit-flow)
+                  ((equal oauth-flow "password") #'swelter--oauth-password-flow)
+                  ((equal oauth-flow "application") #'swelter--oauth-application-flow)
+                  ((equal oauth-flow "accessCode") #'swelter--oauth-code-flow)
+                  ('t
+                   ;; Not an error as there might be other available methods
+                   (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
+                   #'ignore))
                 :auth-url ,oauth-auth-url
+                :token-url ,(map-elt obj "tokenUrl")
                 :client-id client-id
                 :client-secret client-secret
                 :scope (or scope ,oauth-provided-scopes))
              (format "Bearer %s" )
              (cons "Authorization" )
-             oauth2-token-access-token))
-         ((equal oauth-flow "password")
-          `(-some->>
-               (aio-wait-for (swelter--oauth-password-flow
-                              :auth-url ,oauth-auth-url
-                              :client-id client-id
-                              :client-secret client-secret
-                              :scope (or scope ,oauth-provided-scopes)))
-             (format "Bearer %s" )
-             (cons "Authorization" )
-             oauth2-token-access-token))
-         ((equal oauth-flow "application")
-          `(-some->>
-               (aio-wait-for (swelter--oauth-application-flow
-                              :auth-url ,oauth-auth-url
-                              :client-id client-id
-                              :client-secret client-secret
-                              :scope (or scope ,oauth-provided-scopes)))
-             (format "Bearer %s" )
-             (cons "Authorization" )))
-         ((equal oauth-flow "accessCode")
-          `(-some->>
-               (aio-wait-for (swelter--oauth-code-flow
-                              :auth-url ,oauth-auth-url
-                              :token-url ,(map-elt obj "tokenUrl")
-                              :client-id client-id
-                              :client-secret client-secret
-                              :scope (or scope ,oauth-provided-scopes)))
-             (format "Bearer %s" )
-             (cons "Authorization" )
-             oauth2-token-access-token))
-         ('t
-          ;; Not an error as there might be other available methods
-          (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
-          nil)))))))
+             oauth2-token-access-token))))))
 
 (defun swelter--swagger-oauth-scopes-to-string (scope-obj)
   "Get the scope string from a Swagger scope description.
