@@ -459,15 +459,15 @@ or nil if the auth method failed to produce a token."
             (oauth-auth-url (map-elt obj "authorizationUrl")))
         `(-some->>
                (swelter--oauth-with-store
-                ,(cond
-                  ((equal oauth-flow "implicit") #'swelter--oauth-implicit-flow)
-                  ((equal oauth-flow "password") #'swelter--oauth-password-flow)
-                  ((equal oauth-flow "application") #'swelter--oauth-application-flow)
-                  ((equal oauth-flow "accessCode") #'swelter--oauth-code-flow)
-                  ('t
-                   ;; Not an error as there might be other available methods
-                   (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
-                   #'ignore))
+                ',(pcase oauth-flow
+                   ("implicit" #'swelter--oauth-implicit-flow)
+                   ("password" #'swelter--oauth-password-flow)
+                   ("application" #'swelter--oauth-application-flow)
+                   ("accessCode" #'swelter--oauth-code-flow)
+                   (_
+                    ;; Not an error as there might be other available methods
+                    (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
+                    #'ignore))
                 :auth-url ,oauth-auth-url
                 :token-url ,(map-elt obj "tokenUrl")
                 :client-id client-id
