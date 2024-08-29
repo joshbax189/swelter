@@ -517,7 +517,8 @@ SECURITY-DEFINITIONS alist mapping security method names to generating functions
                                           (cons 'client-id     (and (boundp ',client-id-symbol) ,client-id-symbol))
                                           (cons 'client-secret (and (boundp ',client-secret-symbol) ,client-secret-symbol))
                                           (cons 'api-key       (and (boundp ',api-key-symbol) ,api-key-symbol))
-                                          (cons 'server-root   ,server-root))))
+                                          (cons 'server-root   ,server-root)
+                                          (cons 'scope  scope))))
                                  auth-methods-alist)))
               (when (and sec-headers) ;; all non-nil
                 (cl-return sec-headers))))))))
