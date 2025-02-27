@@ -531,14 +531,13 @@ SECURITY-DEFINITIONS alist mapping security method names to generating functions
   "Template for client version check.
 
 CLIENT-NAME string name of client package."
-  `(defun ,(make-symbol (concat client-name "-api-version-check")) ()
+  `(defun ,(intern (concat client-name "-api-version-check")) ()
       "Signals if client version does not match original Swagger file."
-      (let* ((swagger-json (swelter--get-swagger-json ,(make-symbol (concat client-name "-swagger-url"))))
+      (let* ((swagger-json (swelter--get-swagger-json ,(intern (concat client-name "-swagger-url"))))
              (upstream-version (map-nested-elt swagger-json '("info" "version"))))
-        (unless (equal upstream-version ,(make-symbol (concat client-name "-api-version")))
-          (error (format "API version %s did not match client version %s" upstream-version ,(make-symbol (concat client-name "-api-version")))))
-        't))
-  )
+        (unless (equal upstream-version ,(intern (concat client-name "-api-version")))
+          (error (format "API version %s did not match client version %s" upstream-version ,(intern (concat client-name "-api-version")))))
+        't)))
 
 (defun swelter--make-function-name (client-name http-verb path &optional operation-id)
   "Create a skewer-case function name roughly matching the API endpoint.

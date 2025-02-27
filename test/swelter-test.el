@@ -166,6 +166,17 @@
              '(("api_key" . (("$ref" . "https://example.com/foo/bar/baz#Bam"))) ("keys" . (("foo" . (("x" . 1) ("y" . 2))))))
              ))))
 
+(ert-deftest swelter--build-version-check-function/test ()
+  "Tests output of template."
+  (should (equal (swelter--build-version-check-function "foo")
+                 '(defun foo-api-version-check ()
+                    "Signals if client version does not match original Swagger file."
+                    (let* ((swagger-json (swelter--get-swagger-json foo-swagger-url))
+                           (upstream-version (map-nested-elt swagger-json '("info" "version"))))
+                      (unless (equal upstream-version foo-api-version)
+                        (error (format "API version %s did not match client version %s" upstream-version foo-api-version)))
+                      't)))))
+
 (ert-deftest swelter--store-token/test ()
   "Should store tokens without collision."
   (let ((original-plstore oauth2-token-file))
