@@ -1,6 +1,7 @@
 ;; -*- lexical-binding: t -*-
 
 (require 'ert)
+(require 'map)
 (require 'swelter)
 
 (ert-deftest swelter--path-param-sexp/test ()
@@ -177,6 +178,43 @@
                         (error (format "API version %s did not match client version %s" upstream-version foo-api-version)))
                       't)))))
 
+(ert-deftest swelter--make-endpoint-function-params/test ()
+  "Tests parameter lists can be generated from example objects."
+  (let ((query-params
+         (json-parse-string "{\"parameters\":[{\"in\":\"query\",\"description\":\"The number of items to skip before starting to collect the result set.\",\"type\":\"integer\",\"name\":\"offset\"},{\"in\":\"query\",\"description\":\"The numbers of items to return.\",\"type\":\"integer\",\"name\":\"limit\"}]}")))
+    (should (equal (swelter--make-endpoint-function-params (map-elt query-params "parameters"))
+                   '(&optional offset limit))))
+
+  (let ((path-params (json-parse-string "{\"parameters\":[{\"in\":\"path\",\"description\":\"The user ID.\",\"minimum\":1,\"type\":\"integer\",\"required\":true,\"name\":\"id\"}]}")))
+    ;; assume all path params are required
+    (should (equal (swelter--make-endpoint-function-params (map-elt path-params "parameters"))
+                   '(id))))
+
+  (let ((form-params (json-parse-string "{\"parameters\":[{\"in\":\"formData\",\"description\":\"A person's name.\",\"type\":\"string\",\"name\":\"name\"},{\"in\":\"formData\",\"description\":\"A person's favorite number.\",\"type\":\"number\",\"name\":\"fav_number\"}]}")))
+    (should (equal (swelter--make-endpoint-function-params (map-elt form-params "parameters"))
+                   '(&optional name fav_number))))
+  ;; TODO
+  ;; (let ((header-params (json-parse-string "{\"parameters\":[{\"in\":\"header\",\"required\":true,\"type\":\"string\",\"name\":\"X-Request-ID\"}]}")))
+  ;;   (should (equal (swelter--make-endpoint-function-params (map-elt header-params "parameters"))
+  ;;                  '(x-request-id))))
+
+  (let ((body-param
+         (json-parse-string "{\"parameters\":[{\"in\":\"body\",\"schema\":{\"type\":\"string\"},\"required\":true,\"name\":\"status\"}]}")))
+    (should (equal (swelter--make-endpoint-function-params (map-elt body-param "parameters"))
+                   '(status))))
+
+  ;; combo of both rerquired and optional
+  (let ((query-params
+         (json-parse-string "{\"parameters\":[{\"in\":\"query\",\"description\":\"The number of items to skip before starting to collect the result set.\",\"type\":\"integer\",\"name\":\"offset\",\"required\": true},{\"in\":\"query\",\"description\":\"The numbers of items to return.\",\"type\":\"integer\",\"name\":\"limit\"}]}")))
+    (should (equal (swelter--make-endpoint-function-params (map-elt query-params "parameters"))
+                   '(offset &optional limit))))
+
+  ;; required false
+  (let ((query-params
+         (json-parse-string "{\"parameters\":[{\"in\":\"query\",\"description\":\"The number of items to skip before starting to collect the result set.\",\"type\":\"integer\",\"name\":\"offset\",\"required\": false}]}")))
+    (should (equal (swelter--make-endpoint-function-params (map-elt query-params "parameters"))
+                   '(&optional offset)))))
+
 (ert-deftest swelter--store-token/test ()
   "Should store tokens without collision."
   (let ((original-plstore oauth2-token-file))
@@ -198,6 +236,6 @@
             (swelter--store-token token auth-url)
             ;; can get the same token back
             (setq result (swelter--get-stored-token auth-url client-id scope client-secret))
-           (should result)
-           (should (equal "foobar" (oauth2-token-access-token result)))))
+            (should result)
+            (should (equal "foobar" (oauth2-token-access-token result)))))
       (setq oauth2-token-file original-plstore))))

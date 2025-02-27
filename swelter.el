@@ -557,6 +557,44 @@ Assumes CLIENT-NAME is already skewer-case, and PATH does not include any http:/
            (path-skewer (string-join path-parts "-")))
       (format "%s-%s-%s" client-name http-verb path-skewer))))
 
+(defun swelter--make-endpoint-function-params (params-obj)
+  "Create a list of parameters for an endpoint defun template.
+
+PARAMS-OBJ the swagger object describing the endpoint parameters.
+It should be an array of parameter descriptions,
+see https://swagger.io/docs/specification/v2_0/describing-parameters/"
+  (-let* ((params-by-type (seq-group-by (lambda (x) (map-elt x "in"))
+                                        params-obj))
+          ((&alist "path"     path-params
+                   "query"    query-params
+                   ;; TODO support header parameters?
+                   "formData" form-params
+                   "body"     body-params)
+           params-by-type)
+          ;; for these "required" may be :false or nil
+          (required-p (lambda (x) (eq 't (map-elt x "required"))))
+          ((&alist 't  query-params-req
+                   nil query-params-opt)
+           (seq-group-by required-p query-params))
+          ((&alist 't  form-params-req
+                   nil form-params-opt)
+           (seq-group-by required-p form-params))
+          ;; these names are used verbatim
+          (name-to-symbol (lambda (x) (intern (map-elt x "name"))))
+          (required-params
+           (-map
+            name-to-symbol
+            (append path-params query-params-req form-params-req body-params)))
+          (optional-params
+           (-map
+            name-to-symbol
+            ;; assume all path params required
+            (append query-params-opt form-params-opt))))
+  (append
+   required-params
+   (when optional-params
+     (cons '&optional optional-params)))))
+
 (defun swelter--path-param-sexp (path)
   "Convert path template PATH to a s-exp over parameters.
 
@@ -567,6 +605,8 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
     `(format ,format-string ,@params)))
 
 ;; NOTE: This is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
+;; TODO there can be parameters shared across all endpoints in a path, should add an optional object here
+;; TODO collect the global data in an object
 (defun swelter--build-endpoint (http-verb function-name path obj server-root global-security-obj client-name)
   "Template a client function.
 
@@ -580,48 +620,30 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
   (-let* ((path-sexp (swelter--path-param-sexp path))
           (docstring (or (map-elt obj "summary")
                          (format "%s %s." http-verb path)))
-          ((&alist "path"     path-params
-                   "query"    query-params
+          ((&alist "query"    query-params
                    "formData" form-params
                    "body"     body-params)
            (seq-group-by (lambda (x) (map-elt x "in"))
                          (map-elt obj "parameters")))
-          ;; for these "required" may be :false or nil
-          ((&alist 't  query-params-req
-                   nil query-params-opt)
-           (seq-group-by (lambda (x) (eq 't (map-elt x "required")))
-                         query-params))
-          ((&alist 't  form-params-req
-                   nil form-params-opt)
-           (seq-group-by (lambda (x) (eq 't (map-elt x "required")))
-                         form-params))
-          (required-params
-           (--map
-            (make-symbol (map-elt it "name"))
-            (append path-params query-params-req form-params-req body-params)))
-          (optional-params
-           (--map
-            (make-symbol (map-elt it "name"))
-            ;; assume all path params required
-            (append query-params-opt form-params-opt)))
-          ;; function args
-          (params `(,@required-params
-                    ,@(when optional-params (cons '&optional optional-params))))
+          (params (swelter--make-endpoint-function-params (map-elt obj "parameters")))
+          ;; url query string
           (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params))
           (build-form-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) form-params))
           ;; TODO add sanity check warnings, e.g. path params missing from path, cf strava-update-logged-in-athlete
+
           ;; build headers and body
-          ;; TODO can body params be described individually?
+          ;; see https://swagger.io/docs/specification/v2_0/describing-request-body/
+          ;; There can be only one body parameter
           (_ (when (> (length body-params) 1) (error "Multiple parameters for body")))
           (header-and-body (cond
                             (body-params ;; json
                              `((url-request-data (json-encode ,(make-symbol (map-elt (car body-params) "name"))))
                                (url-request-extra-headers '(("Content-Type" . "application/json")))))
-                             (form-params ;; form-data
-                              `((url-request-data (url-build-query-string (list ,@build-form-string-arg)))
-                                (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))))
-                             ;; empty body
-                             ('t '((url-request-extra-headers nil)))))
+                            (form-params ;; form-data
+                             `((url-request-data (url-build-query-string (list ,@build-form-string-arg)))
+                               (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))))
+                            ;; empty body
+                            ('t '((url-request-extra-headers nil)))))
           ;; security
           (security-obj (or (map-elt obj "security") global-security-obj)) ;; an array
           (authorize-function (make-symbol (concat client-name "-authorize")))
@@ -641,7 +663,9 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
               ,@header-and-body
               ,@security-header
               ;; TODO can simplify url when no parameters given to "format"
-              (res (url-retrieve-synchronously (concat ,server-root ,path-sexp ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
+              (res (url-retrieve-synchronously (concat ,server-root
+                                                       ,path-sexp
+                                                       ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
          (with-current-buffer res
            (goto-char (point-min))
            (while (looking-at "^.") (delete-line))
