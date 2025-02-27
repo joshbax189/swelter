@@ -1,0 +1,50 @@
+* Swelter
+
+An OpenAPI client generator for elisp. The title is a loose acronym: "SWagger ELisp TransformER".
+
+Assuming you can find or write an OpenAPI/Swagger spec for a web API, you can then use /swelter/ to generate elisp code that
+wraps the API.
+
+** Features
+- OAuth token handling
+- Swagger v2 support
+- Create elisp clients using only Swagger!
+
+** Install
+
+*Depends on elnode which may not be available in MELPA*
+
+Best to install direct from this repo for now.
+
+** Usage
+
+The first thing to remember is Swagger files are never 100% accurate to the real API, so getting a working example out of the box is very special.
+With that in mind, /swelter/ provides two styles of generation: from a URL, or from a buffer/file. The latter allows you to tweak the client just by
+editing the Swagger!
+
+See the [[./examples]] folder for full implementations of several clients.
+
+*** From URL
+
+#+begin_src emacs-lisp
+(swelter-generate-from-url "my-client" "https://example.com/api/Swagger.json")
+#+end_src
+
+This will create a buffer ~my-client.el~ which contains the newly generated ~my-client~ package.
+
+Then just ~M-x eval-buffer~ and you can use the client functions in your own code.
+
+*** From File
+
+Open a Swagger file, or paste the Swagger spec into a new buffer.
+
+#+begin_src emacs-lisp
+(swelter-generate-from-yaml "my-client")
+#+end_src
+
+As above, this will create a buffer ~my-client.el~ which contains the newly generated ~my-client~ package.
+Again, you must ~M-x eval-buffer~.
+
+** Planned Features
+- Swagger v3 support
+- Support HTTP clients other than ~url-retrieve~
