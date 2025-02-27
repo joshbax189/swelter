@@ -602,7 +602,10 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
   (let* ((parts (string-split path "/{\\|}" t))
          (params (-map #'intern (--filter (not (string-prefix-p "/" it)) parts)))
          (format-string (replace-regexp-in-string "{[^}]+}" "%s" path)))
-    `(format ,format-string ,@params)))
+
+    (if params
+        `(format ,format-string ,@params)
+      format-string)))
 
 ;; NOTE: This is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
 ;; TODO there can be parameters shared across all endpoints in a path, should add an optional object here
@@ -662,7 +665,6 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
        (let* ((url-request-method ,(upcase http-verb))
               ,@header-and-body
               ,@security-header
-              ;; TODO can simplify url when no parameters given to "format"
               (res (url-retrieve-synchronously (concat ,server-root
                                                        ,path-sexp
                                                        ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))

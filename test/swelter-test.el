@@ -6,7 +6,7 @@
 
 (ert-deftest swelter--path-param-sexp/test ()
   "Path strings should be transformed to format expressions."
-  (should (equal (swelter--path-param-sexp "/foo") '(format "/foo")))
+  (should (equal (swelter--path-param-sexp "/foo") "/foo"))
   (should (equal (swelter--path-param-sexp "/foo/{barId}") '(format "/foo/%s" barId)))
   (should (equal (swelter--path-param-sexp "/foo/{barId}/subaz") '(format "/foo/%s/subaz" barId)))
   (should (equal (swelter--path-param-sexp "/foo/{barId}/subaz/{id}") '(format "/foo/%s/subaz/%s" barId id))))
