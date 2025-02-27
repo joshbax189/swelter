@@ -193,10 +193,10 @@
   (let ((form-params (json-parse-string "{\"parameters\":[{\"in\":\"formData\",\"description\":\"A person's name.\",\"type\":\"string\",\"name\":\"name\"},{\"in\":\"formData\",\"description\":\"A person's favorite number.\",\"type\":\"number\",\"name\":\"fav_number\"}]}")))
     (should (equal (swelter--make-endpoint-function-params (map-elt form-params "parameters"))
                    '(&optional name fav_number))))
-  ;; TODO
-  ;; (let ((header-params (json-parse-string "{\"parameters\":[{\"in\":\"header\",\"required\":true,\"type\":\"string\",\"name\":\"X-Request-ID\"}]}")))
-  ;;   (should (equal (swelter--make-endpoint-function-params (map-elt header-params "parameters"))
-  ;;                  '(x-request-id))))
+
+  (let ((header-params (json-parse-string "{\"parameters\":[{\"in\":\"header\",\"required\":true,\"type\":\"string\",\"name\":\"X-Request-ID\"}]}")))
+    (should (equal (swelter--make-endpoint-function-params (map-elt header-params "parameters"))
+                   '(X-Request-ID))))
 
   (let ((body-param
          (json-parse-string "{\"parameters\":[{\"in\":\"body\",\"schema\":{\"type\":\"string\"},\"required\":true,\"name\":\"status\"}]}")))

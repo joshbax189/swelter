@@ -567,7 +567,7 @@ see https://swagger.io/docs/specification/v2_0/describing-parameters/"
                                         params-obj))
           ((&alist "path"     path-params
                    "query"    query-params
-                   ;; TODO support header parameters?
+                   "header"   header-params
                    "formData" form-params
                    "body"     body-params)
            params-by-type)
@@ -579,17 +579,26 @@ see https://swagger.io/docs/specification/v2_0/describing-parameters/"
           ((&alist 't  form-params-req
                    nil form-params-opt)
            (seq-group-by required-p form-params))
+          ((&alist 't  header-params-req
+                   nil header-params-opt)
+           (seq-group-by required-p header-params))
           ;; these names are used verbatim
           (name-to-symbol (lambda (x) (intern (map-elt x "name"))))
           (required-params
            (-map
             name-to-symbol
-            (append path-params query-params-req form-params-req body-params)))
+            (append path-params
+                    query-params-req
+                    form-params-req
+                    header-params-req
+                    body-params)))
           (optional-params
            (-map
             name-to-symbol
             ;; assume all path params required
-            (append query-params-opt form-params-opt))))
+            (append query-params-opt
+                    form-params-opt
+                    header-params-opt))))
   (append
    required-params
    (when optional-params
@@ -625,6 +634,7 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
                          (format "%s %s." http-verb path)))
           ((&alist "query"    query-params
                    "formData" form-params
+                   "header"   header-params
                    "body"     body-params)
            (seq-group-by (lambda (x) (map-elt x "in"))
                          (map-elt obj "parameters")))
@@ -632,6 +642,7 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
           ;; url query string
           (build-query-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) query-params))
           (build-form-string-arg (--map (let ((name (map-elt it "name"))) (list 'list name (make-symbol name))) form-params))
+          (build-header-string-arg (--map (let ((name (map-elt it "name"))) (list 'cons name (make-symbol name))) header-params))
           ;; TODO add sanity check warnings, e.g. path params missing from path, cf strava-update-logged-in-athlete
 
           ;; build headers and body
@@ -647,6 +658,11 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
                                (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))))
                             ;; empty body
                             ('t '((url-request-extra-headers nil)))))
+          ;; add any headers specified as parameters
+          ;; NOTE optional header params are always included but with null value
+          (user-headers (when header-params
+                          `((url-request-extra-headers (append url-request-extra-headers
+                                                               (list ,@build-header-string-arg))))))
           ;; security
           (security-obj (or (map-elt obj "security") global-security-obj)) ;; an array
           (authorize-function (make-symbol (concat client-name "-authorize")))
@@ -665,6 +681,7 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
        (let* ((url-request-method ,(upcase http-verb))
               ,@header-and-body
               ,@security-header
+              ,@user-headers
               (res (url-retrieve-synchronously (concat ,server-root
                                                        ,path-sexp
                                                        ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
