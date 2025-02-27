@@ -14,6 +14,7 @@
 ;; NOTE this is made for Swagger v2 for now
 ;; one difference is body replaced
 
+;;;###autoload
 (defun swelter-generate-from-url (client url)
   "Generate CLIENT from swagger file at URL."
   (interactive)
@@ -29,6 +30,7 @@
    ('t
     (error "Could not determine Swagger file type"))))
 
+;;;###autoload
 (defun swelter-generate-from-json (client &optional buffer-or-name url)
   "Generate OpenAPI CLIENT from JSON in a buffer.
 
@@ -41,6 +43,7 @@ URL fallback url if server is not specified in the swagger."
            (swagger-obj (swelter--replace-all-json-refs swagger-obj)))
       (swelter-generate client swagger-obj (or url "")))))
 
+;;;###autoload
 (defun swelter-generate-from-yaml (client &optional buffer-or-name url)
   "Generate OpenAPI CLIENT from YAML in a buffer.
 
