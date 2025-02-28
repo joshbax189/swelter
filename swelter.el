@@ -78,8 +78,17 @@ URL fallback url if server is not specified in the swagger."
      `(defvar ,(intern (format "%s-swagger-url" client)) ,url)
      (current-buffer))
 
-    (let ((security-definitions (swelter--get-security-definitions (map-elt swagger-obj "securityDefinitions")))
-          (global-security-obj (map-elt swagger-obj "security")))
+    (let* ((security-definitions-obj (map-elt swagger-obj "securityDefinitions"))
+           (security-scopes-alist (swelter--make-security-definition-scopes client security-definitions-obj))
+           (security-definitions (swelter--get-security-definitions security-definitions-obj security-scopes-alist))
+           (global-security-obj (map-elt swagger-obj "security")))
+
+      ;; add defvars for global vars introduced in security-definitions
+      (dolist (scope-cons (-flatten (map-values security-scopes-alist)))
+        ;; some methods (basic auth) do not define any globals
+        (when-let* ((secret-symbol (cdr scope-cons)))
+          (print `(defvar ,secret-symbol)
+                 (current-buffer))))
 
       (cl-prettyprint
        (swelter--build-version-check-function client))
@@ -219,11 +228,13 @@ URL is the original address of the swagger json, used for fallback."
        (warn "Swagger url used HTTP, assuming HTTPS for client url"))
      (concat scheme "://" (or host default-host) base-path)))
 
-(defun swelter--get-security-definitions (obj)
-  "Convert a securityDefinitions OBJ to an alist of name to extra query or headers."
+(defun swelter--get-security-definitions (obj security-scopes)
+  "Convert a securityDefinitions OBJ to an alist of name to a method and scope.
+SECURITY-SCOPES is an alist of name to a scope cons cell."
   (map-apply
    (lambda (name method-obj)
-     (cons name (swelter--build-security-method-v2 method-obj)))
+     (cons name (list :method (swelter--build-security-method-v2 method-obj)
+                      :scope (alist-get name security-scopes))))
    obj))
 
 ;; following tests from LSP-mode
@@ -496,36 +507,50 @@ Returns nil, if SCOPE-OBJ is nil.  The result is not url encoded."
    ((mapp scope-obj)
     (funcall #'string-join (map-keys scope-obj) " "))))
 
+(defun swelter--make-security-definition-scopes (client-name security-definitions-obj)
+  "Create an alist of security definition name to scope alists.
+
+CLIENT-NAME string name of client package.
+SECURITY-DEFINITIONS-OBJ is the parsed JSON representing securityDefinitions.
+
+E.g. ((\"OAuth2\" (client-id . foo-OAuth2-client-id) (client-secret . foo-OAuth2-client-secret)))"
+  (map-apply (lambda (def-name def-spec)
+               (pcase (map-elt def-spec "type")
+                 ("basic"  `(,def-name . ()))
+                 ("apiKey" `(,def-name . ((api-key . ,(intern (concat client-name "-" def-name "-api-key"))))))
+                 ("oauth2" `(,def-name . ((client-id . ,(intern (concat client-name "-" def-name "-client-id")))
+                                          (client-secret . ,(intern (concat client-name "-" def-name "-client-secret"))))))
+                 (_ (error (format "unknown security type for %s" def-name)))))
+             security-definitions-obj))
+
 (defun swelter--build-authorize-function (client-name security-definitions server-root)
   "Template for authorization function.
 
 CLIENT-NAME string name of client package.
-SECURITY-DEFINITIONS alist mapping security method names to generating functions."
-  (let ((client-id-symbol (make-symbol (concat client-name "-client-id")))
-        (client-secret-symbol (make-symbol (concat client-name "-client-secret")))
-        (api-key-symbol (make-symbol (concat client-name "-api-key"))))
-
-   `(defun ,(make-symbol (concat client-name "-authorize")) (security-obj)
-      "Return a list of security headers satisfying SECURITY-OBJ."
-      (let ((security-definitions ',security-definitions))
-        (cl-block nil
-          ;; try each auth method in turn
-          (dolist (auth-method-obj (seq--into-list security-obj))
-            ;; each one must produce a header
-            (let* ((auth-methods-alist (map-pairs auth-method-obj))
-                   (sec-headers (map-apply
-                                 (lambda (auth-method scope)
-                                   (eval (map-elt security-definitions auth-method)
-                                         (list
-                                          (cons 'client-id     (and (boundp ',client-id-symbol) ,client-id-symbol))
-                                          (cons 'client-secret (and (boundp ',client-secret-symbol) ,client-secret-symbol))
-                                          (cons 'api-key       (and (boundp ',api-key-symbol) ,api-key-symbol))
-                                          (cons 'server-root   ,server-root)
-                                          (cons 'scope  scope))))
-                                 auth-methods-alist)))
-              (when (and sec-headers) ;; all non-nil
-                (cl-return sec-headers))))))))
-  )
+SECURITY-DEFINITIONS alist mapping security method names to functions.
+SERVER-ROOT the server url."
+  `(defun ,(make-symbol (concat client-name "-authorize")) (security-obj)
+     "Return a list of security headers satisfying SECURITY-OBJ."
+     (let ((security-definitions ',security-definitions))
+       (cl-block nil
+         ;; try each auth method in turn
+         (dolist (auth-method-obj (seq--into-list security-obj))
+           ;; each one must produce a header
+           (let* ((auth-methods-alist (map-pairs auth-method-obj))
+                  (sec-headers (map-apply
+                                (lambda (auth-method scope)
+                                  (let* ((method-and-scope (map-elt security-definitions auth-method))
+                                         (method (plist-get method-and-scope :method))
+                                         (secret-scope (plist-get method-and-scope :scope)))
+                                      (eval method
+                                            (append
+                                             secret-scope
+                                             (list
+                                              (cons 'server-root   ,server-root)
+                                              (cons 'scope  scope))))))
+                                auth-methods-alist)))
+             (when (and sec-headers) ;; all non-nil
+               (cl-return sec-headers))))))))
 
 (defun swelter--build-version-check-function (client-name)
   "Template for client version check.
