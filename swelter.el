@@ -17,7 +17,7 @@
 ;;;###autoload
 (defun swelter-generate-from-url (client url)
   "Generate CLIENT from swagger file at URL."
-  (interactive)
+  (interactive "sClient: \nsurl: ")
   (cond
    ((string-suffix-p ".yaml" url)
     (with-current-buffer (url-retrieve-synchronously url)
@@ -36,7 +36,7 @@
 
 BUFFER-OR-NAME contains the JSON, if nil uses `current-buffer'.
 URL fallback url if server is not specified in the swagger."
-  (interactive)
+  (interactive "sClient: ")
   (with-current-buffer (or buffer-or-name (current-buffer))
     (swelter--fix-json-big-int)
     (let* ((swagger-obj (json-parse-buffer))
@@ -49,7 +49,7 @@ URL fallback url if server is not specified in the swagger."
 
 BUFFER-OR-NAME contains the YAML, if nil uses `current-buffer'.
 URL fallback url if server is not specified in the swagger."
-  (interactive)
+  (interactive "sClient: ")
   (with-current-buffer (or buffer-or-name (current-buffer))
     (let* ((buffer-string (buffer-substring-no-properties (point-min) (point-max)))
            (swagger-obj (yaml-parse-string buffer-string :object-key-type 'string))
