@@ -43,6 +43,14 @@ URL fallback url if server is not specified in the swagger."
            (swagger-obj (swelter--replace-all-json-refs swagger-obj)))
       (swelter-generate client swagger-obj (or url "")))))
 
+(defun swelter--print-form (form &optional trailing-newline)
+  "Insert FORM in 'current-buffer' updating point for later insertion.
+If TRAILING-NEWLINE is set, add a newline after form."
+  (cl-prettyprint form)
+  (if trailing-newline
+      (forward-char 1)
+    (delete-char 1)))
+
 ;;;###autoload
 (defun swelter-generate-from-yaml (client &optional buffer-or-name url)
   "Generate OpenAPI CLIENT from YAML in a buffer.
@@ -68,15 +76,14 @@ URL fallback url if server is not specified in the swagger."
     (dolist (x '((require 'url)
                  (require 'json)
                  (require 'aio)))
-      (print x (current-buffer)))
+      (swelter--print-form x))
+    (newline)
 
-    (print
-     `(defvar ,(intern (format "%s-api-version" client)) ,(map-nested-elt swagger-obj '("info" "version")))
-     (current-buffer))
+    (swelter--print-form
+     `(defvar ,(intern (format "%s-api-version" client)) ,(map-nested-elt swagger-obj '("info" "version"))))
 
-    (print
-     `(defvar ,(intern (format "%s-swagger-url" client)) ,url)
-     (current-buffer))
+    (swelter--print-form
+     `(defvar ,(intern (format "%s-swagger-url" client)) ,url))
 
     (let* ((security-definitions-obj (map-elt swagger-obj "securityDefinitions"))
            (security-scopes-alist (swelter--make-security-definition-scopes client security-definitions-obj))
@@ -87,16 +94,16 @@ URL fallback url if server is not specified in the swagger."
       (dolist (scope-cons (-flatten (map-values security-scopes-alist)))
         ;; some methods (basic auth) do not define any globals
         (when-let* ((secret-symbol (cdr scope-cons)))
-          (print `(defvar ,secret-symbol)
-                 (current-buffer))))
-
-      (cl-prettyprint
-       (swelter--build-version-check-function client))
+          (swelter--print-form `(defvar ,secret-symbol))))
       (newline)
 
-      (cl-prettyprint
-       (swelter--build-authorize-function client security-definitions server-root))
-      (newline)
+      (swelter--print-form
+       (swelter--build-version-check-function client)
+       t)
+
+      (swelter--print-form
+       (swelter--build-authorize-function client security-definitions server-root)
+       t)
 
       (dolist (path-value (map-pairs (map-elt swagger-obj "paths")))
         (-let [(path . endpoint-obj) path-value]
@@ -104,19 +111,18 @@ URL fallback url if server is not specified in the swagger."
           (dolist (http-verb-value (map-pairs endpoint-obj))
             (-let [(http-verb . path-obj) http-verb-value]
               ;; TODO nil should print as ()?
-              (cl-prettyprint (swelter--build-endpoint
-                               http-verb
-                               (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
-                               path
-                               path-obj
-                               server-root
-                               global-security-obj
-                               client))
-              (newline))))))
+              (swelter--print-form (swelter--build-endpoint
+                             http-verb
+                             (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
+                             path
+                             path-obj
+                             server-root
+                             global-security-obj
+                             client)
+                            t))))))
 
-    (print
-     `(provide (quote ,(intern client)))
-     (current-buffer))))
+    (swelter--print-form
+     `(provide (quote ,(intern client))))))
 
 (defun swelter--fix-json-big-int ()
   "Wrap long ints in string quotes to make valid JSON.
