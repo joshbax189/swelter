@@ -718,8 +718,14 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
                                                        ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
          (with-current-buffer res
            (goto-char (point-min))
-           (while (looking-at "^.") (delete-line))
-           (json-parse-buffer)))))
+           (while (looking-at "^.") (forward-line))
+           (forward-line)
+           ;; Try to parse as JSON and fall back to text
+           ;; TODO read content-type header
+           (condition-case nil
+               (json-parse-string (buffer-substring (point) (point-max)))
+             (error (warn "JSON parse error in response")
+                    (buffer-substring (point) (point-max))))))))
   )
 
 (provide 'swelter)
