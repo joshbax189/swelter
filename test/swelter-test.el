@@ -2,6 +2,7 @@
 
 (require 'ert)
 (require 'map)
+(require 'el-mock)
 (require 'swelter)
 
 (ert-deftest swelter--path-param-sexp/test ()
@@ -44,30 +45,6 @@
       (should (equal "12341234123412341234" (map-nested-elt result '("bar" "id"))))
       ;; short number is not replaced
       (should (equal 1234123412341234 (map-nested-elt result '("bar" "num")))))))
-
-(ert-deftest swelter--get-security-definitions/test ()
-  "Should work on petstore example."
-  (let ((json (json-parse-string "{
-  \"api_key\": {
-    \"type\": \"apiKey\",
-    \"name\": \"api_key\",
-    \"in\": \"header\"
-  },
-  \"petstore_auth\": {
-    \"type\": \"oauth2\",
-    \"authorizationUrl\": \"http://swagger.io/api/oauth/dialog\",
-    \"flow\": \"implicit\",
-    \"scopes\": {
-      \"write:pets\": \"modify pets in your account\",
-      \"read:pets\": \"read your pets\"
-    }
-  }
-}" :object-type 'hash-table)))
-    (should (equal
-             (swelter--get-security-definitions json)
-             '(("api_key" :header ("api_key" . api-key))
-               ("petstore_auth" :header ("Authorization" (format "Bearer %s" (swelter-oauth-implicit "http://swagger.io/api/oauth/dialog" client-id client-secret scopes)))))
-             ))))
 
 (ert-deftest swelter--get-server-root-url-v2/test ()
   "Test cases"
@@ -239,3 +216,158 @@
             (should result)
             (should (equal "foobar" (oauth2-token-access-token result)))))
       (setq oauth2-token-file original-plstore))))
+
+(ert-deftest swelter--build-api-key/test ()
+  "Tests normal behavior of header API key function."
+  (let* ((sec-obj (json-parse-string "{
+  \"type\": \"apiKey\",
+  \"name\": \"api_key\",
+  \"in\": \"header\"
+}"))
+         (client-name "45")
+         (scheme-name "56")
+         (result (swelter--build-api-key client-name scheme-name sec-obj)))
+    ;; should return a list of lists
+    (should (equal (type-of result)
+                   'cons))
+    (should (equal (type-of (car result))
+                   'cons))
+
+    ;; eval the generated function
+    (dolist (form result)
+      (eval form))
+
+    ;; should create a header
+    (setq 45-56-api-key "foobar123")
+    (should (equal (apply (swelter--get-security-definition-function client-name scheme-name) ())
+                   (cons "api_key" "foobar123")))
+
+    ;; should be nil if var is nil
+    (setq 45-56-api-key nil)
+    (should-not (apply (swelter--get-security-definition-function client-name scheme-name) ()))))
+
+(ert-deftest swelter--build-api-key/test-query-key ()
+  "Should ignore API keys for the query string."
+  (let* ((sec-obj (json-parse-string "{
+  \"type\": \"apiKey\",
+  \"name\": \"api_key\",
+  \"in\": \"query\"
+}"))
+         (client-name "45")
+         (scheme-name "56")
+         (result (swelter--build-api-key client-name scheme-name sec-obj)))
+    (should-not result)))
+
+(ert-deftest swelter--build-basic-auth/test ()
+  "Tests normal behavior of basic auth function."
+  (let* ((sec-obj (json-parse-string "{
+  \"type\": \"basic\"
+}"))
+         (client-name "101")
+         (scheme-name "102")
+         (result (swelter--build-basic-auth client-name scheme-name sec-obj)))
+    ;; should return a list of lists
+    (should (equal (type-of result)
+                   'cons))
+    (should (equal (type-of (car result))
+                   'cons))
+
+    ;; eval the generated function
+    (dolist (form result)
+      (eval form))
+
+    ;; should create a header
+    (with-mock
+      (stub url-basic-auth => "foobar123")
+      (should (equal (apply (swelter--get-security-definition-function client-name scheme-name) '(:server-root "http://foobar.com/"))
+                     (cons "Authorization" "foobar123"))))
+
+    ;; should be nil if result is nil
+    (with-mock
+      (stub url-basic-auth => nil)
+      (should-not (apply (swelter--get-security-definition-function client-name scheme-name) '(:server-root "http://foobar.com/"))))))
+
+(ert-deftest swelter--build-oauth/test ()
+  "Tests normal behavior of header API key function."
+  (let* ((sec-obj (json-parse-string "{
+  \"type\": \"oauth2\",
+  \"authorizationUrl\": \"http://swagger.io/api/oauth/dialog\",
+  \"flow\": \"implicit\",
+  \"scopes\": {
+    \"write:pets\": \"modify pets in your account\",
+    \"read:pets\": \"read your pets\"
+  }
+}"))
+         (client-name "123")
+         (scheme-name "456")
+         (result (swelter--build-oauth client-name scheme-name sec-obj)))
+    ;; should return a list of lists
+    (should (equal (type-of result)
+                   'cons))
+    (should (equal (type-of (car result))
+                   'cons))
+
+    ;; eval the generated function
+    (dolist (form result)
+      (eval form))
+
+    ;; should create a header
+    (with-mock
+      (mock
+       (swelter--oauth-with-store
+        * ;; implicit flow, but symbol doesn't match
+        :auth-url "http://swagger.io/api/oauth/dialog"
+        :token-url nil
+        :client-id "id"
+        :client-secret "secret"
+        :scope "write:pets read:pets")
+            => "foobar123")
+      (setq 123-456-client-id "id"
+            123-456-client-secret "secret")
+      (should (equal (apply (swelter--get-security-definition-function client-name scheme-name) ())
+                     (cons "Authorization" "Bearer foobar123"))))
+
+    ;; should be nil if oauth result is nil
+    (with-mock
+      (stub swelter--oauth-with-store => nil)
+      (should-not (apply (swelter--get-security-definition-function client-name scheme-name) ())))))
+
+;; these integration tests also cover swelter--build-authorize-function
+(ert-deftest swelter--authorize-fn/test-api-key ()
+  "Generated auth function should handle API keys."
+  (let* ((sec-defs-obj (json-parse-string "{
+    \"api_key\": {
+      \"type\": \"apiKey\",
+      \"name\": \"api_key\",
+      \"in\": \"header\"
+    }}"))
+         (client "401")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+    (dolist (form defs)
+      (eval form))
+    (eval auth)
+
+    (setq 401-api_key-api-key "foo123")
+    (should (equal '(("api_key" . "foo123"))
+                   (401-authorize (json-parse-string "[{ \"api_key\": [] }]"))))))
+
+(ert-deftest swelter--authorize-fn/test-query-api-key ()
+  "Generated auth function should ignore API keys in query."
+  (let* ((sec-defs-obj (json-parse-string "{
+    \"api_key\": {
+      \"type\": \"apiKey\",
+      \"name\": \"api_key\",
+      \"in\": \"query\"
+    }}"))
+         (client "402")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+    (should-not defs)
+    (eval auth)
+
+    ;; even though key is set it should not appear as a header
+    (setq 402-api_key-api-key "foo123")
+    (should-not (402-authorize (json-parse-string "[{ \"api_key\": [] }]")))))

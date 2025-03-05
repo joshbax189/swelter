@@ -86,23 +86,17 @@ URL fallback url if server is not specified in the swagger."
      `(defvar ,(intern (format "%s-swagger-url" client)) ,url))
 
     (let* ((security-definitions-obj (map-elt swagger-obj "securityDefinitions"))
-           (security-scopes-alist (swelter--make-security-definition-scopes client security-definitions-obj))
-           (security-definitions (swelter--get-security-definitions security-definitions-obj security-scopes-alist))
            (global-security-obj (map-elt swagger-obj "security")))
 
-      ;; add defvars for global vars introduced in security-definitions
-      (dolist (scope-cons (-flatten (map-values security-scopes-alist)))
-        ;; some methods (basic auth) do not define any globals
-        (when-let* ((secret-symbol (cdr scope-cons)))
-          (swelter--print-form `(defvar ,secret-symbol))))
-      (newline)
+      (dolist (form (swelter--build-security-definitions client security-definitions-obj))
+        (swelter--print-form form t))
 
       (swelter--print-form
        (swelter--build-version-check-function client)
        t)
 
       (swelter--print-form
-       (swelter--build-authorize-function client security-definitions server-root)
+       (swelter--build-authorize-function client security-definitions-obj server-root)
        t)
 
       (dolist (path-value (map-pairs (map-elt swagger-obj "paths")))
@@ -234,15 +228,19 @@ URL is the original address of the swagger json, used for fallback."
        (warn "Swagger url used HTTP, assuming HTTPS for client url"))
      (concat scheme "://" (or host default-host) base-path)))
 
-(defun swelter--get-security-definitions (obj security-scopes)
-  "Convert a securityDefinitions OBJ to an alist of name to a method and scope.
-SECURITY-SCOPES is an alist of name to a scope cons cell."
-  (map-apply
-   (lambda (name method-obj)
-     (cons name (list :method (swelter--build-security-method-v2 method-obj)
-                      :scope (alist-get name security-scopes))))
-   obj))
+(defun swelter--build-security-definitions (client-name obj)
+  "Convert a securityDefinitions OBJ to a list of forms.
+CLIENT-NAME is the string name of the client."
+  (apply #'append
+   (map-apply
+    (lambda (scheme-name sec-obj)
+      (pcase (map-elt sec-obj "type")
+        ("basic" (swelter--build-basic-auth client-name scheme-name sec-obj))
+        ("apiKey" (swelter--build-api-key client-name scheme-name sec-obj))
+        ("oauth2" (swelter--build-oauth client-name scheme-name sec-obj))))
+    obj)))
 
+;;; OAuth handling
 ;; following tests from LSP-mode
 (defun swelter--port-available (port)
   "Return non-nil if PORT is available."
@@ -445,57 +443,7 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
                 :scope scope))
       auth-url)))
 
-(defun swelter--build-security-method-v2 (obj)
-  "Construct a header generating function for a security definition OBJ.
-
-Returns either a form which can be evaluated to get a header cons cell,
-or nil if the auth method failed to produce a token."
-  ;; NOTE: Expect that they will be eval'd with free vars bound
-  (let ((method-type (map-elt obj "type")))
     (cond
-     ((equal method-type "basic")
-      ;; free var: server-root
-      '(-some->> (url-basic-auth server-root 't) (cons "Authorization")))
-
-     ((equal method-type "apiKey")
-      ;; free var: api-key
-      (let ((key-location (map-elt obj "in")))
-        (cond
-         ((equal key-location "header")
-          (let ((header-name (map-elt obj "name")))
-            `((lambda () (cons ,header-name api-key)))))
-         ((equal key-location "query")
-          ;; FIXME: the query param is roughly like `(,(map-elt "name") . api-key)
-          (warn "Swelter does not support auth by query params")
-          nil))))
-
-     ((equal method-type "oauth2")
-      ;; free var: client-id, client-secret, scope
-      (let ((oauth-flow (map-elt obj "flow"))
-            ;; FIXME: These are actually the available scopes,
-            ;;        "scope" from the endpoint security object lists REQUIRED scopes.
-            ;;        So could intersect these to fail out of a method that doesn't provide those?
-            (oauth-provided-scopes (swelter--swagger-oauth-scopes-to-string (map-elt obj "scopes")))
-            (oauth-auth-url (map-elt obj "authorizationUrl")))
-        `(-some->>
-               (swelter--oauth-with-store
-                ',(pcase oauth-flow
-                   ("implicit" #'swelter--oauth-implicit-flow)
-                   ("password" #'swelter--oauth-password-flow)
-                   ("application" #'swelter--oauth-application-flow)
-                   ("accessCode" #'swelter--oauth-code-flow)
-                   (_
-                    ;; Not an error as there might be other available methods
-                    (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
-                    #'ignore))
-                :auth-url ,oauth-auth-url
-                :token-url ,(map-elt obj "tokenUrl")
-                :client-id client-id
-                :client-secret client-secret
-                :scope (or scope ,oauth-provided-scopes))
-             (format "Bearer %s" )
-             (cons "Authorization" )
-             oauth2-token-access-token))))))
 
 (defun swelter--swagger-oauth-scopes-to-string (scope-obj)
   "Get the scope string from a Swagger scope description.
@@ -513,21 +461,73 @@ Returns nil, if SCOPE-OBJ is nil.  The result is not url encoded."
    ((mapp scope-obj)
     (funcall #'string-join (map-keys scope-obj) " "))))
 
-(defun swelter--make-security-definition-scopes (client-name security-definitions-obj)
-  "Create an alist of security definition name to scope alists.
+(defun swelter--get-security-definition-function (client-name scheme-name)
+  "Given a SCHEME-NAME get the symbol for the function implementing it.
+CLIENT-NAME is the string name of the client."
+  (intern (format "%s--authorize-%s" client-name scheme-name)))
 
+(defun swelter--build-oauth (client-name scheme-name sec-obj)
+  "Template for OAuth security definition.
 CLIENT-NAME string name of client package.
-SECURITY-DEFINITIONS-OBJ is the parsed JSON representing securityDefinitions.
+SCHEME-NAME is the name of the security definition.
+SEC-OBJ is the security scheme object."
+  (let ((oauth-flow (map-elt sec-obj "flow"))
+        ;; FIXME: These are actually the available scopes,
+        ;;        "scope" from the endpoint security object lists REQUIRED scopes.
+        ;;        So could intersect these to fail out of a method that doesn't provide those?
+        (oauth-provided-scopes (swelter--swagger-oauth-scopes-to-string (map-elt sec-obj "scopes")))
+        (client-id (intern (concat client-name "-" scheme-name "-client-id")))
+        (client-secret (intern (concat client-name "-" scheme-name "-client-secret"))))
+    `((defvar ,client-id)
+      (defvar ,client-secret)
+      (cl-defun ,(swelter--get-security-definition-function client-name scheme-name) (&key scope &allow-other-keys)
+        "Authorize using OAuth2 code flow and return the Authorization header."
+        (when-let* ((token (swelter--oauth-with-store
+                            ',(pcase oauth-flow
+                                ("implicit" #'swelter--oauth-implicit-flow)
+                                ("password" #'swelter--oauth-password-flow)
+                                ("application" #'swelter--oauth-application-flow)
+                                ("accessCode" #'swelter--oauth-code-flow)
+                                (_
+                                 ;; Not an error as there might be other available methods
+                                 (warn (format "Swelter does not support OAuth2 %s flow" oauth-flow))
+                                 #'ignore))
+                            :auth-url
+                            ,(map-elt sec-obj "authorizationUrl")
+                            :token-url
+                            ,(map-elt sec-obj "tokenUrl")
+                            :client-id ,client-id
+                            :client-secret ,client-secret
+                            :scope (or scope ,oauth-provided-scopes))))
+          (cons "Authorization" (format "Bearer %s" token)))))))
 
-E.g. ((\"OAuth2\" (client-id . foo-OAuth2-client-id) (client-secret . foo-OAuth2-client-secret)))"
-  (map-apply (lambda (def-name def-spec)
-               (pcase (map-elt def-spec "type")
-                 ("basic"  `(,def-name . ()))
-                 ("apiKey" `(,def-name . ((api-key . ,(intern (concat client-name "-" def-name "-api-key"))))))
-                 ("oauth2" `(,def-name . ((client-id . ,(intern (concat client-name "-" def-name "-client-id")))
-                                          (client-secret . ,(intern (concat client-name "-" def-name "-client-secret"))))))
-                 (_ (error (format "unknown security type for %s" def-name)))))
-             security-definitions-obj))
+(defun swelter--build-api-key (client-name scheme-name sec-obj)
+  "Template for API key security definition.
+CLIENT-NAME string name of client package.
+SCHEME-NAME is the name of the security definition.
+SEC-OBJ is the security scheme object."
+  (if (equal (map-elt sec-obj "in") "query")
+      (prog1 nil
+        (warn (format "Ignored query API key security definition in %s" scheme-name)))
+      (let ((api-key (intern (concat client-name "-" scheme-name "-api-key"))))
+        `((defvar ,api-key)
+          (defun ,(swelter--get-security-definition-function client-name scheme-name) (&rest _)
+            "Authorize using API key in header."
+            (when ,api-key
+             (cons ,(map-elt sec-obj "name") ,api-key)))))))
+
+(defun swelter--build-basic-auth (client-name scheme-name sec-obj)
+  "Template for basic auth security definition.
+CLIENT-NAME string name of client package.
+SCHEME-NAME is the name of the security definition.
+SEC-OBJ is the security scheme object."
+  ;; must return a list of defuns to match signature of other sec def methods
+  `((cl-defun ,(swelter--get-security-definition-function client-name scheme-name) (&key server-root &allow-other-keys)
+      ,(or
+        (map-elt sec-obj "description")
+        "Authorize using basic authentication and return the Authorization header.")
+      (when-let* ((auth-string (url-basic-auth server-root 't)))
+        (cons "Authorization" auth-string)))))
 
 (defun swelter--build-authorize-function (client-name security-definitions server-root)
   "Template for authorization function.
@@ -535,28 +535,27 @@ E.g. ((\"OAuth2\" (client-id . foo-OAuth2-client-id) (client-secret . foo-OAuth2
 CLIENT-NAME string name of client package.
 SECURITY-DEFINITIONS alist mapping security method names to functions.
 SERVER-ROOT the server url."
-  `(defun ,(make-symbol (concat client-name "-authorize")) (security-obj)
+  `(defun ,(intern (concat client-name "-authorize")) (security-obj)
      "Return a list of security headers satisfying SECURITY-OBJ."
-     (let ((security-definitions ',security-definitions))
-       (cl-block nil
+     (let ((security-definitions ',(map-keys-apply (lambda (name) (cons name (swelter--get-security-definition-function client-name name)))
+                                                   security-definitions)))
+       (cl-block 'outer
          ;; try each auth method in turn
          (dolist (auth-method-obj (seq--into-list security-obj))
            ;; each one must produce a header
            (let* ((auth-methods-alist (map-pairs auth-method-obj))
                   (sec-headers (map-apply
                                 (lambda (auth-method scope)
-                                  (let* ((method-and-scope (map-elt security-definitions auth-method))
-                                         (method (plist-get method-and-scope :method))
-                                         (secret-scope (plist-get method-and-scope :scope)))
-                                      (eval method
-                                            (append
-                                             secret-scope
+                                  (let ((method (map-elt security-definitions auth-method)))
+                                    (when (fboundp method)
+                                      (apply method
                                              (list
-                                              (cons 'server-root   ,server-root)
-                                              (cons 'scope  scope))))))
+                                              :server-root ,server-root
+                                              :scope       scope)))))
                                 auth-methods-alist)))
-             (when (and sec-headers) ;; all non-nil
-               (cl-return sec-headers))))))))
+             (when (seq-every-p #'identity sec-headers) ;; all non-nil
+               (cl-return-from 'outer sec-headers))))
+         (cl-return-from 'outer nil)))))
 
 (defun swelter--build-version-check-function (client-name)
   "Template for client version check.
@@ -696,7 +695,7 @@ CLIENT-NAME string name of the generated client to be used as a prefix"
                                                                (list ,@build-header-string-arg))))))
           ;; security
           (security-obj (or (map-elt obj "security") global-security-obj)) ;; an array
-          (authorize-function (make-symbol (concat client-name "-authorize")))
+          (authorize-function (intern (concat client-name "-authorize")))
           (security-header (when (and security-obj
                                       ;; when security-obj is [] security is specifically ignored for this endpoint
                                       (not (seq-empty-p security-obj)))
