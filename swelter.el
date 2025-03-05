@@ -75,7 +75,7 @@ URL fallback url if server is not specified in the swagger."
 
     (dolist (x '((require 'url)
                  (require 'json)
-                 (require 'aio)))
+                 (require 'cl-lib)))
       (swelter--print-form x))
     (newline)
 
