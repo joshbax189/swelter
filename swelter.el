@@ -478,8 +478,8 @@ SEC-OBJ is the security scheme object."
         (oauth-provided-scopes (swelter--swagger-oauth-scopes-to-string (map-elt sec-obj "scopes")))
         (client-id (intern (concat client-name "-" scheme-name "-client-id")))
         (client-secret (intern (concat client-name "-" scheme-name "-client-secret"))))
-    `((defvar ,client-id)
-      (defvar ,client-secret)
+    `((defvar ,client-id nil)
+      (defvar ,client-secret nil)
       (cl-defun ,(swelter--get-security-definition-function client-name scheme-name) (&key scope &allow-other-keys)
         "Authorize using OAuth2 code flow and return the Authorization header."
         (when-let* ((token (swelter--oauth-with-store
@@ -510,7 +510,7 @@ SEC-OBJ is the security scheme object."
       (prog1 nil
         (warn (format "Ignored query API key security definition in %s" scheme-name)))
       (let ((api-key (intern (concat client-name "-" scheme-name "-api-key"))))
-        `((defvar ,api-key)
+        `((defvar ,api-key nil)
           (defun ,(swelter--get-security-definition-function client-name scheme-name) (&rest _)
             "Authorize using API key in header."
             (when ,api-key
