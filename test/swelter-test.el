@@ -397,18 +397,18 @@
     (setq 11-oauth-client-id "id"
           11-oauth-client-secret "secret")
 
-    ;; TODO what should happen when overwriting scopes with nothing?
-    ;; (with-mock
-    ;;   (mock (swelter--oauth-with-store
-    ;;          *
-    ;;          :auth-url "http://swagger.io/api/oauth/dialog"
-    ;;          :token-url nil
-    ;;          :client-id "id"
-    ;;          :client-secret "secret"
-    ;;          :scope nil)
-    ;;         => "foo123")
-    ;;   (should (equal '(("Authorization" . "Bearer foo123"))
-    ;;                  (11-authorize (json-parse-string "[{ \"oauth\": [] }]")))))
+    ;; empty scope should be passed thru
+    (with-mock
+      (mock (swelter--oauth-with-store
+             *
+             :auth-url "http://swagger.io/api/oauth/dialog"
+             :token-url nil
+             :client-id "id"
+             :client-secret "secret"
+             :scope "")
+            => "foo123")
+      (should (equal '(("Authorization" . "Bearer foo123"))
+                     (11-authorize (json-parse-string "[{ \"oauth\": [] }]")))))
 
     ;; single required scope
     (with-mock

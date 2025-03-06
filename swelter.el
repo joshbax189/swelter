@@ -472,10 +472,10 @@ CLIENT-NAME string name of client package.
 SCHEME-NAME is the name of the security definition.
 SEC-OBJ is the security scheme object."
   (let ((oauth-flow (map-elt sec-obj "flow"))
-        ;; FIXME: These are actually the available scopes,
-        ;;        "scope" from the endpoint security object lists REQUIRED scopes.
-        ;;        So could intersect these to fail out of a method that doesn't provide those?
-        (oauth-provided-scopes (swelter--swagger-oauth-scopes-to-string (map-elt sec-obj "scopes")))
+        ;; NOTE: These are actually the available scopes,
+        ;;       "scope" from the endpoint security object lists REQUIRED scopes.
+        ;;       So could intersect these to fail out of a method that doesn't provide those?
+        ;; (oauth-provided-scopes (swelter--swagger-oauth-scopes-to-string (map-elt sec-obj "scopes")))
         (client-id (intern (concat client-name "-" scheme-name "-client-id")))
         (client-secret (intern (concat client-name "-" scheme-name "-client-secret"))))
     `((defvar ,client-id nil)
@@ -498,7 +498,7 @@ SEC-OBJ is the security scheme object."
                             ,(map-elt sec-obj "tokenUrl")
                             :client-id ,client-id
                             :client-secret ,client-secret
-                            :scope (or scope ,oauth-provided-scopes))))
+                            :scope scope)))
           (cons "Authorization" (format "Bearer %s" token)))))))
 
 (defun swelter--build-api-key (client-name scheme-name sec-obj)
