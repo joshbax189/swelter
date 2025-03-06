@@ -372,8 +372,6 @@
     (setq 402-api_key-api-key "foo123")
     (should-not (402-authorize (json-parse-string "[{ \"api_key\": [] }]")))))
 
-;; TODO test and/or combinations
-
 (ert-deftest swelter--authorize-fn/test-oauth-scopes ()
   "Required scopes should be passed."
   (let* ((sec-defs-obj (json-parse-string "{
@@ -447,5 +445,117 @@
              :scope "write:pets read:pets")
             => "foo123")
       (should (equal '(("Authorization" . "Bearer foo123"))
-                     (11-authorize (json-parse-string "[{ \"oauth\": [\"write:pets\", \"read:pets\"] }]")))))
-    ))
+                     (11-authorize (json-parse-string "[{ \"oauth\": [\"write:pets\", \"read:pets\"] }]")))))))
+
+(ert-deftest swelter--authorize-fn/test-no-auth ()
+  "Authorize with empty security obj should not pass any headers."
+  (let* ((sec-defs-obj (json-parse-string "{
+    \"api_key\": {
+      \"type\": \"apiKey\",
+      \"name\": \"api_key\",
+      \"in\": \"header\"
+    }}"))
+         (client "403")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+
+    (dolist (form defs)
+      (eval form))
+    (eval auth)
+
+    (setq 403-api_key-api-key "foo123")
+    (should-not (403-authorize (json-parse-string "[]")))))
+
+(ert-deftest swelter--authorize-fn/test-no-match ()
+  "Authorize with non-matching security obj should not pass any headers."
+  (let* ((sec-defs-obj (json-parse-string "{
+    \"api_key\": {
+      \"type\": \"apiKey\",
+      \"name\": \"api_key\",
+      \"in\": \"header\"
+    }}"))
+         (client "404")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+
+    (dolist (form defs)
+      (eval form))
+    (eval auth)
+
+    (setq 404-api_key-api-key "foo123")
+    (should-not (404-authorize (json-parse-string "[{ \"scrog\": [] }]")))))
+
+(ert-deftest swelter--authorize-fn/test-both ()
+  "Authorize with two required schemes."
+  (let* ((sec-defs-obj (json-parse-string "{
+    \"key-a\": {
+      \"type\": \"apiKey\",
+      \"name\": \"key-a\",
+      \"in\": \"header\"
+    },
+    \"key-b\": {
+      \"type\": \"apiKey\",
+      \"name\": \"key-b\",
+      \"in\": \"header\"
+    }
+}"))
+         (client "103")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+
+    (dolist (form defs)
+      (eval form))
+    (eval auth)
+
+    (setq 103-key-a-api-key "a")
+    (setq 103-key-b-api-key "b")
+    (should (equal '(("key-a" . "a") ("key-b" . "b"))
+                   (103-authorize (json-parse-string "[{ \"key-a\": [], \"key-b\": [] }]"))))))
+
+(ert-deftest swelter--authorize-fn/test-either ()
+  "Authorize with two optional schemes."
+  (let* ((sec-defs-obj (json-parse-string "{
+    \"key-a\": {
+      \"type\": \"apiKey\",
+      \"name\": \"key-a\",
+      \"in\": \"header\"
+    },
+    \"key-b\": {
+      \"type\": \"apiKey\",
+      \"name\": \"key-b\",
+      \"in\": \"header\"
+    }
+}"))
+         (client "104")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+
+    (dolist (form defs)
+      (eval form))
+    (eval auth)
+
+    ;; only one should be set
+    (setq 104-key-a-api-key nil)
+    (setq 104-key-b-api-key "b")
+    (should (equal '(("key-b" . "b"))
+             (104-authorize (json-parse-string "[{ \"key-a\": [] }, { \"key-b\": [] }]"))))))
+
+(ert-deftest swelter--authorize-fn/test-nil ()
+  "Authorize when securityDefinitions are nil."
+  (let* ((sec-defs-obj nil)
+         (client "100")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+    (dolist (form defs)
+      (eval form))
+    (eval auth)
+
+    ;; assume security object will be nil too
+    (should-not (100-authorize (json-parse-string "[]")))))
+
+;;; swelter-test.el ends here
