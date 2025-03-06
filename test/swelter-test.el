@@ -371,3 +371,81 @@
     ;; even though key is set it should not appear as a header
     (setq 402-api_key-api-key "foo123")
     (should-not (402-authorize (json-parse-string "[{ \"api_key\": [] }]")))))
+
+;; TODO test and/or combinations
+
+(ert-deftest swelter--authorize-fn/test-oauth-scopes ()
+  "Required scopes should be passed."
+  (let* ((sec-defs-obj (json-parse-string "{
+\"oauth\": {
+  \"type\": \"oauth2\",
+  \"authorizationUrl\": \"http://swagger.io/api/oauth/dialog\",
+  \"flow\": \"implicit\",
+  \"scopes\": {
+    \"write:pets\": \"modify pets in your account\",
+    \"read:pets\": \"read your pets\"
+  }
+}}"))
+         (client "11")
+         (defs (swelter--build-security-definitions client sec-defs-obj))
+         (auth (swelter--build-authorize-function client sec-defs-obj "http://foo.com")))
+
+    (dolist (form defs)
+      (eval form))
+    (eval auth)
+
+    (setq 11-oauth-client-id "id"
+          11-oauth-client-secret "secret")
+
+    ;; TODO what should happen when overwriting scopes with nothing?
+    ;; (with-mock
+    ;;   (mock (swelter--oauth-with-store
+    ;;          *
+    ;;          :auth-url "http://swagger.io/api/oauth/dialog"
+    ;;          :token-url nil
+    ;;          :client-id "id"
+    ;;          :client-secret "secret"
+    ;;          :scope nil)
+    ;;         => "foo123")
+    ;;   (should (equal '(("Authorization" . "Bearer foo123"))
+    ;;                  (11-authorize (json-parse-string "[{ \"oauth\": [] }]")))))
+
+    ;; single required scope
+    (with-mock
+      (mock (swelter--oauth-with-store
+             *
+             :auth-url "http://swagger.io/api/oauth/dialog"
+             :token-url nil
+             :client-id "id"
+             :client-secret "secret"
+             :scope "write:pets")
+            => "foo123")
+      (should (equal '(("Authorization" . "Bearer foo123"))
+                     (11-authorize (json-parse-string "[{ \"oauth\": [\"write:pets\"] }]")))))
+
+    ;; required scope is not in securityDefinitions
+    (with-mock
+      (mock (swelter--oauth-with-store
+             *
+             :auth-url "http://swagger.io/api/oauth/dialog"
+             :token-url nil
+             :client-id "id"
+             :client-secret "secret"
+             :scope "admin")
+            => "foo123")
+      (should (equal '(("Authorization" . "Bearer foo123"))
+                     (11-authorize (json-parse-string "[{ \"oauth\": [\"admin\"] }]")))))
+
+    ;; multiple scopes
+    (with-mock
+      (mock (swelter--oauth-with-store
+             *
+             :auth-url "http://swagger.io/api/oauth/dialog"
+             :token-url nil
+             :client-id "id"
+             :client-secret "secret"
+             :scope "write:pets read:pets")
+            => "foo123")
+      (should (equal '(("Authorization" . "Bearer foo123"))
+                     (11-authorize (json-parse-string "[{ \"oauth\": [\"write:pets\", \"read:pets\"] }]")))))
+    ))

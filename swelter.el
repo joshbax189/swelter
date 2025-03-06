@@ -551,7 +551,7 @@ SERVER-ROOT the server url."
                                       (apply method
                                              (list
                                               :server-root ,server-root
-                                              :scope       scope)))))
+                                              :scope       (swelter--swagger-oauth-scopes-to-string scope))))))
                                 auth-methods-alist)))
              (when (seq-every-p #'identity sec-headers) ;; all non-nil
                (cl-return-from 'outer sec-headers))))
