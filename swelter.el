@@ -461,23 +461,97 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
     (plstore-save plstore)
     token))
 
-(cl-defun swelter--oauth-with-store (method &key auth-url token-url client-id client-secret scope)
- "Auth perhaps with a stored token."
- (or (swelter--get-stored-token auth-url client-id
-                                client-secret
-                                token-url)
-     ;; TODO renew? IIRC only auth-code flow does refresh tokens
-     (swelter--store-token
-      (aio-wait-for
-       (funcall method
-                :auth-url auth-url
-                :token-url token-url
-                :client-id client-id
-                :client-secret client-secret
-                :scope scope))
-      auth-url)))
+(defun swelter--token-scope (token)
+  "Get TOKEN scope as a list of strings."
+  ;; FIXME: actually store scopes in the main token
+  (string-split (map-elt
+                 (oauth2-token-access-response token) 'scope)
+                " "))
 
+(defun swelter--token-scope-difference (token scope)
+  "Return list of scopes in SCOPE but not in TOKEN struct's scopes.
+
+SCOPE may be a sequence of strings or a single string with space-delimited scopes."
+  (when (stringp scope)
+    (setq scope (string-split scope " ")))
+  (let ((token-scopes
+         (swelter--token-scope token)))
+    (seq-difference scope token-scopes)))
+
+(defun swelter--token-time-until-expiry (token)
+  "Seconds remaining before TOKEN expires.
+
+Result is negative if TOKEN is already expired, positive if still valid,
+and nil if expiry time could not be determined."
+  (let* ((expiry (map-elt (oauth2-token-access-response token) 'expires_in))
+         (jwt-payload (nth 1 (string-split (oauth2-token-access-token token) "\\.")))
+         (jwt-payload (json-parse-string (base64-decode-string jwt-payload 't)))
+         (jwt-iat (map-elt jwt-payload "iat"))
+         (jwt-exp (map-elt jwt-payload "exp"))
+         (time-seconds (time-convert (current-time) 'integer)))
     (cond
+     (jwt-exp
+      (- jwt-exp time-seconds))
+     ((and jwt-iat expiry)
+      (- (+ jwt-iat expiry) time-seconds)))))
+
+;; TODO scope may be empty string or nil
+(cl-defun swelter--oauth-with-store (method &key auth-url token-url client-id client-secret scope)
+  "Auth perhaps with a stored token."
+  (let* ((token (swelter--get-stored-token auth-url
+                                    client-id
+                                    client-secret
+                                    token-url))
+         (expiry (and token (swelter--token-time-until-expiry token)))
+         (missing-scopes (and token (swelter--token-scope-difference token scope))))
+    (cond
+     ;; cache miss
+     ((not token)
+      (swelter--store-token
+       (aio-wait-for
+        (funcall method
+                 :auth-url auth-url
+                 :token-url token-url
+                 :client-id client-id
+                 :client-secret client-secret
+                 :scope scope))
+       auth-url))
+     ;; if there are missing scopes then refresh will not help
+     (missing-scopes
+      (swelter--store-token
+       (aio-wait-for
+        (funcall method
+                 :auth-url auth-url
+                 :token-url token-url
+                 :client-id client-id
+                 :client-secret client-secret
+                 ;; NOTE: extends stored scope with missing scope
+                 :scope (append missing-scopes (swelter--token-scope token))))
+       auth-url))
+     ;; expired
+     ((or (not expiry) (<= expiry 0))
+      (if-let ((refresh-token (oauth2-token-refresh-token token)))
+          (swelter--store-token
+           (aio-wait-for
+            (swelter--oauth-refresh-flow
+             :token-url token-url
+             :token refresh-token
+             :client-id client-id
+             :client-secret client-secret
+             :scope scope))
+           auth-url)
+        ;; else get a new token
+        (swelter--store-token
+         (aio-wait-for
+          (funcall method
+                   :auth-url auth-url
+                   :token-url token-url
+                   :client-id client-id
+                   :client-secret client-secret
+                   :scope scope))
+         auth-url)))
+     ;; otherwise use stored token
+     ('t token))))
 
 (defun swelter--swagger-oauth-scopes-to-string (scope-obj)
   "Get the scope string from a Swagger scope description.
