@@ -388,6 +388,40 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                           :refresh-token (map-elt result "refresh_token")
                           :access-response result))))))))
 
+(cl-defun swelter--oauth-refresh-flow (&key token-url token client-id client-secret scope &allow-other-keys)
+  "Auth using refresh token TOKEN (a string).
+
+CLIENT-SECRET If the application is a “confidential client” (not a mobile or JavaScript app),
+              then the secret is included as well.
+SCOPE Optional, must match scope of original token."
+  (let* ((url-request-method "POST")
+         (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))
+         (form-data `(("grant_type" "refresh_token")
+                      ("client_id" ,client-id)))
+         (form-data (if client-secret
+                        (`("client_secret" ,client-secret) . form-data)
+                      form-data))
+         (form-data (if scope
+                        (`("scope" ,scope) . form-data)
+                      form-data))
+         (url-request-data (url-build-query-string form-data))
+         (promise (aio-promise)))
+    (prog1 promise
+      (with-current-buffer (url-retrieve-synchronously token-url)
+        (goto-char (point-min))
+        (while (looking-at "^.") (delete-line))
+        (let ((result (json-parse-buffer)))
+          (aio-resolve promise
+                       (lambda ()
+                         (make-oauth2-token
+                          :client-id client-id
+                          :client-secret client-secret
+                          :token-url token-url
+                          :access-token (map-elt result "access_token")
+                          ;; Assume current refresh token remains valid
+                          :refresh-token (or (map-elt result "refresh_token") token)
+                          :access-response result))))))))
+
 (defun swelter--get-stored-token (auth-url client-id &optional client-secret token-url)
   "Get and rehydrate stored token for AUTH-URL and CLIENT-ID.
 
