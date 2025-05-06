@@ -5,7 +5,6 @@
 (require 'url)
 (require 'dash)
 (require 's)
-(require 'oauth2)
 (require 'cl-lib)
 (require 'aio)
 (require 'yaml)
@@ -192,6 +191,58 @@ CLIENT-NAME is the string name of the client."
     obj)))
 
 ;;; OAuth handling
+;; TODO update to something useful
+;; TODO namespace to this package
+;; see e.g. https://sourcegraph.com/github.com/syl20bnr/spacelpa/-/blob/packages/oauth2-0.11.el
+(cl-defstruct oauth2-token
+client-id
+client-secret
+token-url
+access-token
+refresh-token
+access-response
+plstore
+plstore-id)
+
+;; other oauth2 stubs
+(defun oauth2-request-access (token-url client-id client-secret code &optional redirect-uri)
+  "Request OAuth access at TOKEN-URL.
+The CODE should be obtained with `oauth2-request-authorization'.
+Return an `oauth2-token' structure."
+  (when code
+    (let ((result
+           (oauth2-make-access-request
+            token-url
+            (concat
+             "client_id=" client-id
+             "&client_secret=" client-secret
+             "&code=" code
+             "&redirect_uri=" (url-hexify-string (or redirect-uri "urn:ietf:wg:oauth:2.0:oob"))
+             "&grant_type=authorization_code"))))
+      (make-oauth2-token :client-id client-id
+                         :client-secret client-secret
+                         :access-token (cdr (assoc 'access_token result))
+                         :refresh-token (cdr (assoc 'refresh_token result))
+                         :token-url token-url
+                         :access-response result))))
+
+(defun oauth2-make-access-request (url data)
+  "Make an access request to URL using DATA in POST."
+  (let ((url-request-method "POST")
+        (url-request-data data)
+        (url-request-extra-headers
+         '(("Content-Type" . "application/x-www-form-urlencoded"))))
+    (with-current-buffer (url-retrieve-synchronously url)
+      (let ((data (oauth2-request-access-parse)))
+        (kill-buffer (current-buffer))
+        data))))
+
+(defun oauth2-request-access-parse ()
+  "Parse the result of an OAuth request."
+  (goto-char (point-min))
+  (when (search-forward-regexp "^$" nil t)
+    (json-read)))
+
 ;; following tests from LSP-mode
 (defun swelter--port-available (port)
   "Return non-nil if PORT is available."
