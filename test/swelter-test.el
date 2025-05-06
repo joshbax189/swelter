@@ -87,63 +87,6 @@
       (should (equal (swelter--get-server-root-url-v2 json "http://foo.com/bar/apiDocs.json")
                      "https://spoon.com:8081"))))
 
-(ert-deftest swelter--resolve-json-ref/test ()
-  "Should work on petstore example."
-  (let ((json (json-parse-string "{
-  \"api_key\": {
-    \"$ref\": \"#/keys/foo\"
-  },
-  \"keys\": {
-    \"foo\": {
-      \"x\": 1,
-      \"y\": 2
-    },
-    \"bar\": [ \"x\", \"y\", \"z\" ]
-  }
-}" :object-type 'hash-table)))
-   (should (equal
-            (map-pairs (swelter--resolve-json-ref "#/keys/foo" json))
-            '(("x" . 1) ("y" . 2))))
-   (should (equal
-            (swelter--resolve-json-ref "#/keys/bar/1" json)
-            "y"))))
-
-(ert-deftest swelter--replace-all-json-refs/test ()
-  "Should work on petstore example."
-  (let ((json (json-parse-string "{
-  \"api_key\": {
-    \"$ref\": \"#/keys/foo\"
-  },
-  \"keys\": {
-    \"foo\": {
-      \"x\": 1,
-      \"y\": 2
-    }
-  }
-}" :object-type 'hash-table)))
-    (should (equal
-             (swelter--replace-all-json-refs json)
-             '(("api_key" . (("x" . 1) ("y" . 2))) ("keys" . (("foo" . (("x" . 1) ("y" . 2))))))
-             ))))
-
-(ert-deftest swelter--replace-all-json-refs/test-unknown ()
-  "Should work on petstore example."
-  (let ((json (json-parse-string "{
-  \"api_key\": {
-    \"$ref\": \"https://example.com/foo/bar/baz#Bam\"
-  },
-  \"keys\": {
-    \"foo\": {
-      \"x\": 1,
-      \"y\": 2
-    }
-  }
-}" :object-type 'hash-table)))
-    (should (equal
-             (swelter--replace-all-json-refs json)
-             '(("api_key" . (("$ref" . "https://example.com/foo/bar/baz#Bam"))) ("keys" . (("foo" . (("x" . 1) ("y" . 2))))))
-             ))))
-
 (ert-deftest swelter--build-version-check-function/test ()
   "Tests output of template."
   (should (equal (swelter--build-version-check-function "foo")

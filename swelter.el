@@ -10,6 +10,7 @@
 (require 'aio)
 (require 'yaml)
 (require 'plstore)
+(require 'jsonp) ;; github.com/joshbax189/jsonp-el
 
 ;; NOTE this is made for Swagger v2 for now
 ;; one difference is body replaced
@@ -40,7 +41,8 @@ URL fallback url if server is not specified in the swagger."
   (with-current-buffer (or buffer-or-name (current-buffer))
     (swelter--fix-json-big-int)
     (let* ((swagger-obj (json-parse-buffer))
-           (swagger-obj (swelter--replace-all-json-refs swagger-obj)))
+           ;; TODO remote urls?
+           (swagger-obj (jsonp-replace-refs swagger-obj)))
       (swelter-generate client swagger-obj (or url "")))))
 
 (defun swelter--print-form (form &optional trailing-newline)
@@ -61,7 +63,8 @@ URL fallback url if server is not specified in the swagger."
   (with-current-buffer (or buffer-or-name (current-buffer))
     (let* ((buffer-string (buffer-substring-no-properties (point-min) (point-max)))
            (swagger-obj (yaml-parse-string buffer-string :object-key-type 'string))
-           (swagger-obj (swelter--replace-all-json-refs swagger-obj)))
+           ;; TODO remote urls?
+           (swagger-obj (jsonp-replace-refs swagger-obj)))
       (swelter-generate client swagger-obj (or url "")))))
 
 (defun swelter-generate (client swagger-obj url)
@@ -134,59 +137,6 @@ Rationale is:
       (while (re-search-forward "[[:space:]]\\([0-9]\\{19\\}[0-9]*\\)" nil 't)
         (replace-match "\"\\1\"")))))
 
-(defun swelter--resolve-json-ref (path root-obj)
-  "Lookup JSON pointer PATH in ROOT-OBJ.
-
-Returns nil if node is not found."
-  (let* ((clean-path (string-remove-prefix "#/" path))
-         (path-components (string-split clean-path "/"))
-         (current-loc root-obj))
-    (while-let ((current-token (car path-components)))
-      ;; map-elt allows indexing into strings, but JSON pointer does not
-      ;; return nil in that case
-      (when (stringp current-loc)
-        (setq current-loc nil))
-      ;; vectors must be indexed with numbers
-      (if (and (vectorp current-loc)
-               ;; because (string-to-number "foo") is 0
-               (string-match-p "[0-9]+" current-token))
-          (setq current-loc (map-elt current-loc (string-to-number current-token)))
-        ;; else treat current-token as a string
-        (setq current-loc (map-elt current-loc current-token)))
-      (setq path-components (cdr path-components)))
-    current-loc))
-
-(defun swelter--replace-json-ref (json-obj root-obj)
-  "Given parsed JSON-OBJ expand any $ref.
-
-References are resolved in ROOT-OBJ."
-  ;; only use JSON pointers for now, begin with #
-  (if-let* ((ref-string (map-elt json-obj "$ref")))
-      (if (string-prefix-p "#" ref-string)
-          (swelter--resolve-json-ref ref-string root-obj)
-        (warn (format "Unknown json $ref %s" ref-string))
-        nil)
-    json-obj))
-
-(defun swelter--replace-all-json-refs (json-obj &optional root-obj)
-  "Given parsed JSON-OBJ expand any $ref.
-
-References are resolved in ROOT-OBJ."
-  (setq root-obj (or root-obj json-obj))
-  (map-apply
-   (lambda (key val)
-     (cond
-      ((or (not (mapp val))
-           (stringp val))
-       (cons key val))
-      ((vectorp val)
-       ;; recurse and rebuild vector
-       (cons key (apply #'vector (map-values (swelter--replace-all-json-refs val root-obj)))))
-      ('t (if-let ((new-val (swelter--replace-json-ref val root-obj)))
-              (cons key (swelter--replace-all-json-refs new-val root-obj))
-            (cons key val)))))
-   json-obj))
-
 (defun swelter--get-swagger-json (url)
   "Get and parse swagger.json from URL.
 
@@ -198,7 +148,8 @@ Throws if missing or not a valid json."
                          (while (looking-at "^.") (delete-line))
                          (swelter--fix-json-big-int)
                          (json-parse-buffer)))
-         (result (swelter--replace-all-json-refs swagger-json)))
+         ;; TODO remote urls?
+         (result (jsonp-replace-refs swagger-json)))
     (with-current-buffer (get-buffer-create "*swelter-debug*")
       (cl-prettyprint result))
     result))
