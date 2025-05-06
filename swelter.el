@@ -47,10 +47,10 @@ URL fallback url if server is not specified in the swagger."
 (defun swelter--print-form (form &optional trailing-newline)
   "Insert FORM in 'current-buffer' updating point for later insertion.
 If TRAILING-NEWLINE is set, add a newline after form."
-  (cl-prettyprint form)
-  (if trailing-newline
-      (forward-char 1)
-    (delete-char 1)))
+  ;; This fixes the nil => '() issue, but formatting of let blocks is so wacky
+  (pp-emacs-lisp-code form)
+  (when trailing-newline
+    (newline)))
 
 ;;;###autoload
 (defun swelter-generate-from-yaml (client &optional buffer-or-name url)
@@ -106,7 +106,6 @@ URL fallback url if server is not specified in the swagger."
           ;; path is e.g. "/pet/{petId}"
           (dolist (http-verb-value (map-pairs endpoint-obj))
             (-let [(http-verb . path-obj) http-verb-value]
-              ;; TODO nil should print as ()?
               (swelter--print-form (swelter--build-endpoint
                              http-verb
                              (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
