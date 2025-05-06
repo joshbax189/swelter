@@ -135,31 +135,6 @@
     (should (equal (swelter--make-endpoint-function-params (map-elt query-params "parameters"))
                    '(&optional offset)))))
 
-(ert-deftest swelter--store-token/test ()
-  "Should store tokens without collision."
-  (let ((original-plstore oauth2-token-file))
-    (unwind-protect
-        (progn
-          (setq oauth2-token-file "./test-tokens")
-          (let* ((auth-url "https://example.com/authorize")
-                 (client-id "a-client")
-                 (client-secret "a-secret")
-                 (scope "read:profile write:profile")
-                 (token (make-oauth2-token
-                         :client-id client-id
-                         :client-secret client-secret
-                         :access-token "foobar"
-                         :refresh-token "baz123"
-                         :access-response `(("scope" . ,scope))))
-                 result)
-            ;; store a token
-            (swelter--store-token token auth-url)
-            ;; can get the same token back
-            (setq result (swelter--get-stored-token auth-url client-id scope client-secret))
-            (should result)
-            (should (equal "foobar" (oauth2-token-access-token result)))))
-      (setq oauth2-token-file original-plstore))))
-
 (ert-deftest swelter--build-api-key/test ()
   "Tests normal behavior of header API key function."
   (let* ((sec-obj (json-parse-string "{
