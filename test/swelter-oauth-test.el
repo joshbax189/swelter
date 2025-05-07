@@ -5,7 +5,14 @@
 (require 'ert)
 (require 'map)
 (require 'el-mock)
+(require 'json)
 (require 'swelter-oauth)
+
+(defun swelter-oauth-test--make-jwt (obj)
+  "Make a mock JWT that encodes OBJ."
+  (let* ((jwt-payload (json-encode obj))
+         (jwt-encoded (base64-encode-string jwt-payload)))
+    (concat "header." jwt-encoded ".signature")))
 
 (ert-deftest swelter-oauth--token-scope-difference/test-empty ()
   "Tests empty scope edge cases."
@@ -62,5 +69,37 @@
             (should result)
             (should (equal "foobar" (oauth2-token-access-token result)))))
       (setq swelter-oauth-token-file original-plstore))))
+
+(ert-deftest swelter-oauth--token-time-until-expiry/jwt-exp ()
+  "It should use the JWT exp claim when present."
+  (let* ((now (time-convert (current-time) 'integer))
+         (jwt-exp (+ now 3600))
+         (jwt-payload `(("exp" . ,jwt-exp)))
+         (token (make-oauth2-token :access-token (swelter-oauth-test--make-jwt jwt-payload))))
+    (should (eq (- jwt-exp now)
+                (swelter-oauth--token-time-until-expiry token)))))
+
+(ert-deftest swelter-oauth--token-time-until-expiry/jwt-iat ()
+  "It should use the JWT iat claim when exp is not present."
+  (let* ((now (time-convert (current-time) 'integer))
+         (jwt-iat (- now 3600))
+         (expires-in 7200)
+         (jwt-payload `(("iat" . ,jwt-iat)))
+         (token (make-oauth2-token :access-token (swelter-oauth-test--make-jwt jwt-payload)
+                                   :access-response `((expires_in . ,expires-in)))))
+    (should (eq (- (+ jwt-iat expires-in) now)
+                (swelter-oauth--token-time-until-expiry token)))))
+
+(ert-deftest swelter-oauth--token-time-until-expiry/expired ()
+  "It should be negative when token is expired."
+  (let* ((now (time-convert (current-time) 'integer))
+         (jwt-exp (- now 3600)) ;; expiry in the past
+         (jwt-payload `(("exp" . ,jwt-exp)))
+         (token (make-oauth2-token :access-token (swelter-oauth-test--make-jwt jwt-payload))))
+    (should (< (swelter-oauth--token-time-until-expiry token) 0))))
+
+(ert-deftest swelter-oauth--token-time-until-expiry/no-expiry-info ()
+  (let ((token (make-oauth2-token)))
+    (should-not (swelter-oauth--token-time-until-expiry token))))
 
 ;;; swelter-oauth-test.el ends here

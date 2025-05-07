@@ -352,22 +352,30 @@ SCOPE may be a sequence of strings or a single string with space-delimited scope
          (swelter-oauth--token-scope token)))
     (seq-difference scope token-scopes)))
 
+;; NOTE assumes TOKEN has access-response that includes expires_in
 (defun swelter-oauth--token-time-until-expiry (token)
   "Seconds remaining before TOKEN expires.
 
 Result is negative if TOKEN is already expired, positive if still valid,
 and nil if expiry time could not be determined."
-  (let* ((expiry (map-elt (oauth2-token-access-response token) 'expires_in))
-         (jwt-payload (nth 1 (string-split (oauth2-token-access-token token) "\\.")))
-         (jwt-payload (json-parse-string (base64-decode-string jwt-payload 't)))
-         (jwt-iat (map-elt jwt-payload "iat"))
-         (jwt-exp (map-elt jwt-payload "exp"))
-         (time-seconds (time-convert (current-time) 'integer)))
-    (cond
-     (jwt-exp
-      (- jwt-exp time-seconds))
-     ((and jwt-iat expiry)
-      (- (+ jwt-iat expiry) time-seconds)))))
+  ;; if there is no access token, then return nil
+  (when-let* ((access-token (oauth2-token-access-token token))
+              ;; TODO perhaps replace with jwt lib
+              (jwt-payload (nth 1 (string-split access-token "\\.")))
+              (jwt-payload (json-parse-string (base64-decode-string jwt-payload 't))))
+
+    (let* ((expiry (map-elt (oauth2-token-access-response token) 'expires_in))
+           (jwt-iat (map-elt jwt-payload "iat"))
+           (jwt-exp (map-elt jwt-payload "exp"))
+           (time-seconds (time-convert (current-time) 'integer)))
+      (cond
+       ;; A JWT "exp" claim gives the absolute expiry time
+       (jwt-exp
+        (- jwt-exp time-seconds))
+       ;; Otherwise the response may give a lifetime in seconds
+       ;; This needs the JWT "iat" claim to work out the actual age
+       ((and jwt-iat expiry)
+        (- (+ jwt-iat expiry) time-seconds))))))
 
 ;; TODO scope may be empty string or nil
 (cl-defun swelter-oauth-auth-with-store (method &key auth-url token-url client-id client-secret scope)
