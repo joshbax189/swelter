@@ -338,16 +338,16 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
 (defun swelter-oauth--token-scope (token)
   "Get TOKEN scope as a list of strings."
   ;; FIXME: actually store scopes in the main token
-  (string-split (map-elt
-                 (oauth2-token-access-response token) 'scope)
-                " "))
+  (when-let* ((scope (map-elt
+                      (oauth2-token-access-response token) 'scope)))
+   (string-split scope " " t)))
 
 (defun swelter-oauth--token-scope-difference (token scope)
   "Return list of scopes in SCOPE but not in TOKEN struct's scopes.
 
 SCOPE may be a sequence of strings or a single string with space-delimited scopes."
   (when (stringp scope)
-    (setq scope (string-split scope " ")))
+    (setq scope (string-split scope " " t)))
   (let ((token-scopes
          (swelter-oauth--token-scope token)))
     (seq-difference scope token-scopes)))
