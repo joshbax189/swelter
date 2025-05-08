@@ -423,6 +423,9 @@ GLOBAL-PROPS a `swelter-global-props' struct with top-level objects"
   (-let* ((server-root (swelter-global-props-server-root global-props))
           (global-security-obj (swelter-global-props-security global-props))
           (client-name (swelter-global-props-client-name global-props))
+          (consumes (seq-concatenate 'list
+                     (swelter-global-props-client-name global-props)
+                     (map-elt obj "consumes")))
           (path-sexp (swelter--path-param-sexp path))
           (docstring (or (map-elt obj "summary")
                          (format "%s %s." http-verb path)))
@@ -443,10 +446,18 @@ GLOBAL-PROPS a `swelter-global-props' struct with top-level objects"
           ;; see https://swagger.io/docs/specification/v2_0/describing-request-body/
           ;; There can be only one body parameter
           (_ (when (> (length body-params) 1) (error "Multiple parameters for body")))
+          (body-is-json (and body-params
+                             (or (not consumes) ;; default to JSON if no consumes prop
+                                 (seq-contains-p consumes "application/json"))))
           (header-and-body (cond
-                            (body-params ;; json
+                            (body-is-json
                              `((url-request-data (json-encode ,(make-symbol (map-elt (car body-params) "name"))))
                                (url-request-extra-headers '(("Content-Type" . "application/json")))))
+                            (body-params
+                             (when (< 1 (length consumes))
+                               (warn "Could not decide Content-Type for %s using %s" function-name (car consumes)))
+                             `((url-request-data ,(make-symbol (map-elt (car body-params) "name")))
+                               (url-request-extra-headers '(("Content-Type" . ,(car consumes))))))
                             (form-params ;; form-data
                              `((url-request-data (url-build-query-string (list ,@build-form-string-arg)))
                                (url-request-extra-headers '(("Content-Type" . "application/x-www-form-urlencoded")))))

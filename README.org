@@ -45,6 +45,69 @@ Open a Swagger file, or paste the Swagger spec into a new buffer.
 As above, this will create a buffer ~my-client.el~ which contains the newly generated ~my-client~ package.
 Again, you must ~M-x eval-buffer~.
 
+*** Specifics
+
+**** Setting Content-Type via "consumes"
+
+_version 2.0_
+
+It is assumed by default that the content type for "body" parameters will be JSON.
+This means, if there is a choice of several types and "application/json" is present, then that will be chosen.
+
+For example, the endpoint description
+#+begin_src json
+{
+  "/pet": {
+      "post": {
+        "tags": [
+          "pet"
+        ],
+        "summary": "Add a new pet to the store",
+        "description": "",
+        "operationId": "addPet",
+        "consumes": [
+          "application/json",
+          "application/xml"
+        ],
+        /* ... */
+        }
+    }
+ }
+#+end_src
+
+will produce a function like
+#+begin_src emacs-lisp
+(defun client-add-pet (body)
+  "Add a new pet to the store"
+  (let* ((url-request-method "POST")
+         ;; parse BODY as JSON
+         (url-request-data (json-encode body))
+         (url-request-extra-headers '(("Content-Type" . "application/json")))
+         (res (url-retrieve-synchronously
+               "https://petstore.swagger.io/v2/pet")))
+    ;; etc
+    ))
+#+end_src
+
+If you want ~client-add-pet~ to support XML instead, you would have to manually alter it.
+
+If the "consumes" prop is a single element array, e.g. ~["application/xml"]~, then ~body~ will be assumed to be serialized to that type already:
+#+begin_src emacs-lisp
+;; when consumes is ["application/xml"]
+(defun client-add-pet (body)
+  "Add a new pet to the store"
+  (let* ((url-request-method "POST")
+         (url-request-data body) ;; BODY is not altered
+         (url-request-extra-headers '(("Content-Type" . "application/xml")))
+         (res (url-retrieve-synchronously
+               "https://petstore.swagger.io/v2/pet")))
+    ;; etc
+    ))
+#+end_src
+
+When the "consumes" prop has multiple elements, but none are "application/json", then the first is chosen and ~body~ is passed through like the example
+above. A warning is printed in that case.
+
 ** Planned Features
 - Swagger v3 support
 - Support HTTP clients other than ~url-retrieve~
