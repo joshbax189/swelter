@@ -92,7 +92,13 @@ URL fallback url if server is not specified in the swagger."
      `(defvar ,(intern (format "%s-swagger-url" client)) ,url))
 
     (let* ((security-definitions-obj (map-elt swagger-obj "securityDefinitions"))
-           (global-security-obj (map-elt swagger-obj "security")))
+           (global-security-obj (map-elt swagger-obj "security"))
+           (global-consumes (map-elt swagger-obj "consumes"))
+           (global-props (make-swelter-global-props
+                          :server-root server-root
+                          :security global-security-obj
+                          :client-name client
+                          :consumes global-consumes)))
 
       (dolist (form (swelter--build-security-definitions client security-definitions-obj))
         (swelter--print-form form t))
@@ -115,9 +121,7 @@ URL fallback url if server is not specified in the swagger."
                              (make-symbol (swelter--make-function-name client http-verb path (map-elt path-obj "operationId")))
                              path
                              path-obj
-                             server-root
-                             global-security-obj
-                             client)
+                             global-props)
                             t))))))
 
     (swelter--print-form
@@ -180,6 +184,13 @@ URL is the original address of the swagger json, used for fallback."
      (when (equal "http" (url-type swagger-url))
        (warn "Swagger url used HTTP, assuming HTTPS for client url"))
      (concat scheme "://" (or host default-host) base-path)))
+
+(cl-defstruct swelter-global-props
+  "Parsed Swagger objects defined at the top-level of the spec."
+  (server-root "Full root URL")
+  (security "Contains default auth methods for all endpoints")
+  (client-name "Swelter client prefix string")
+  (consumes "Optional list of mime types that all endpoints may consume"))
 
 (defun swelter--build-security-definitions (client-name obj)
   "Convert a securityDefinitions OBJ to a list of forms.
@@ -380,18 +391,18 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
 
 ;; NOTE: This is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
 ;; TODO there can be parameters shared across all endpoints in a path, should add an optional object here
-;; TODO collect the global data in an object
-(defun swelter--build-endpoint (http-verb function-name path obj server-root global-security-obj client-name)
+(defun swelter--build-endpoint (http-verb function-name path obj global-props)
   "Template a client function.
 
 HTTP-VERB e.g. \"get\" \"put\" etc
 FUNCTION-NAME full name of the function to generate
 PATH relative path of the endpoint from SERVER-ROOT
 OBJ the swagger object describing the endpoint
-SERVER-ROOT the overall root url
-GLOBAL-SECURITY-OBJ contains default auth methods for all endpoints
-CLIENT-NAME string name of the generated client to be used as a prefix"
-  (-let* ((path-sexp (swelter--path-param-sexp path))
+GLOBAL-PROPS a `swelter-global-props' struct with top-level objects"
+  (-let* ((server-root (swelter-global-props-server-root global-props))
+          (global-security-obj (swelter-global-props-security global-props))
+          (client-name (swelter-global-props-client-name global-props))
+          (path-sexp (swelter--path-param-sexp path))
           (docstring (or (map-elt obj "summary")
                          (format "%s %s." http-verb path)))
           ((&alist "query"    query-params
