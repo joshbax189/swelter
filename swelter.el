@@ -389,6 +389,27 @@ E.g. \"/foo/{bar}\" becomes `(format \"/foo/%s\" bar)'"
         `(format ,format-string ,@params)
       format-string)))
 
+(defun swelter--concat (&rest args)
+  "Concat ARGS if they are strings or wrap in a template if sexps."
+  (let ((prefix "")
+        xs)
+   (dolist (x args)
+     (if (stringp x)
+         (setq prefix (concat prefix x))
+       ;; assume sexp, ignore nil
+       (when x
+        (unless (string-empty-p prefix)
+          (push prefix xs))
+        (push x xs)
+        (setq prefix ""))))
+   ;; tidy up last iter
+   (unless (or (not xs)
+               (string-empty-p prefix))
+     (push prefix xs))
+   (if xs
+       `(concat ,@(reverse xs))
+     prefix)))
+
 ;; NOTE: This is specific to v2 because of new requestBody keyword in v3 replacing in: body param type.
 ;; TODO there can be parameters shared across all endpoints in a path, should add an optional object here
 (defun swelter--build-endpoint (http-verb function-name path obj global-props)
@@ -455,9 +476,10 @@ GLOBAL-PROPS a `swelter-global-props' struct with top-level objects"
               ,@header-and-body
               ,@security-header
               ,@user-headers
-              (res (url-retrieve-synchronously (concat ,server-root
-                                                       ,path-sexp
-                                                       ,@(when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
+              (res (url-retrieve-synchronously ,(apply #'swelter--concat
+                                                       server-root
+                                                       path-sexp
+                                                       (when query-params `("?" (url-build-query-string (list ,@build-query-string-arg))))))))
          (with-current-buffer res
            (goto-char (point-min))
            (while (looking-at "^.") (forward-line))
