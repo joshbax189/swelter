@@ -41,8 +41,10 @@ URL fallback url if server is not specified in the swagger."
   (with-current-buffer (or buffer-or-name (current-buffer))
     (swelter--fix-json-big-int)
     (let* ((swagger-obj (json-parse-buffer))
-           ;; TODO remote urls?
-           (swagger-obj (jsonp-replace-refs swagger-obj)))
+           ;; only resolve $refs from same host
+           (server-root (swelter--get-server-root-url-v2 swagger-obj url))
+           (remote (when server-root (jsonp-remote :whitelist (list server-root))))
+           (swagger-obj (jsonp-replace-refs swagger-obj nil nil remote)))
       (swelter-generate client swagger-obj (or url "")))))
 
 (defun swelter--print-form (form &optional trailing-newline)
@@ -60,12 +62,15 @@ If TRAILING-NEWLINE is set, add a newline after form."
 BUFFER-OR-NAME contains the YAML, if nil uses `current-buffer'.
 URL fallback url if server is not specified in the swagger."
   (interactive "sClient: ")
+  (setq url (or url ""))
   (with-current-buffer (or buffer-or-name (current-buffer))
     (let* ((buffer-string (buffer-substring-no-properties (point-min) (point-max)))
            (swagger-obj (yaml-parse-string buffer-string :object-key-type 'string))
-           ;; TODO remote urls?
-           (swagger-obj (jsonp-replace-refs swagger-obj)))
-      (swelter-generate client swagger-obj (or url "")))))
+           ;; only resolve $refs from same host
+           (server-root (swelter--get-server-root-url-v2 swagger-obj url))
+           (remote (when server-root (jsonp-remote :whitelist (list server-root))))
+           (swagger-obj (jsonp-replace-refs swagger-obj nil nil remote)))
+      (swelter-generate client swagger-obj url))))
 
 (defun swelter-generate (client swagger-obj url)
   "Generate CLIENT from parsed SWAGGER-OBJ originally at URL."
@@ -154,8 +159,10 @@ Throws if missing or not a valid json."
                          (while (looking-at "^.") (delete-line))
                          (swelter--fix-json-big-int)
                          (json-parse-buffer)))
-         ;; TODO remote urls?
-         (result (jsonp-replace-refs swagger-json)))
+         ;; only resolve $refs from same host
+         (server-root (url-host (url-generic-parse-url url)))
+         (remote (when server-root (jsonp-remote :whitelist (list server-root))))
+         (result (jsonp-replace-refs swagger-json nil nil remote)))
     (with-current-buffer (get-buffer-create "*swelter-debug*")
       (cl-prettyprint result))
     result))
