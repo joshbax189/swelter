@@ -14,6 +14,15 @@
          (jwt-encoded (base64-encode-string jwt-payload)))
     (concat "header." jwt-encoded ".signature")))
 
+(ert-deftest swelter-oauth--make-state-string/test ()
+  "Test basic behavior."
+  (let* ((n 5)
+         (result (swelter-oauth--make-state-string n)))
+    (should result)
+    (should (stringp result))
+    (should (equal (length result)
+                   n))))
+
 (ert-deftest swelter-oauth--token-scope-difference/test-empty ()
   "Tests empty scope edge cases."
   (let* ((scope "read:profile write:profile")
@@ -60,7 +69,7 @@
                          :client-secret client-secret
                          :access-token "foobar"
                          :refresh-token "baz123"
-                         :access-response `(("scope" . ,scope))))
+                         :access-response `((scope . ,scope))))
                  result)
             ;; store a token
             (swelter-oauth--store-token token auth-url)
