@@ -69,12 +69,14 @@
                          :client-secret client-secret
                          :access-token "foobar"
                          :refresh-token "baz123"
+                         :scope scope
                          :access-response `((scope . ,scope))))
                  result)
             ;; store a token
+            ;; TODO this triggers a manual keyring unlock?
             (swelter-oauth--store-token token auth-url)
             ;; can get the same token back
-            (setq result (swelter-oauth--get-stored-token auth-url client-id scope client-secret))
+            (setq result (swelter-oauth--get-stored-token auth-url client-id client-secret "" '("read:profile")))
             (should result)
             (should (equal "foobar" (swelter-oauth-token-access-token result)))))
       (setq swelter-oauth-token-file original-plstore))))

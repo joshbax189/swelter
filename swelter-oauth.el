@@ -307,45 +307,51 @@ SCOPE Optional, must match scope of original token."
   "Make an id for a token.
 AUTH-URL used to identify host
 CLIENT-ID identify different clients for same host, this is the OAuth client id."
+  ;; NOTE: see oauth2-compute-id
   (secure-hash 'md5 (concat auth-url client-id)))
 
-(defun swelter-oauth--get-stored-token (auth-url client-id client-secret token-url)
+(defun swelter-oauth--get-stored-token (auth-url client-id client-secret token-url required-scopes)
   "Get and rehydrate stored token for AUTH-URL and CLIENT-ID.
-
+REQUIRED-SCOPES should be a list of scopes that the token should have.
 Note CLIENT-SECRET and TOKEN-URL are required to rehydrate the token."
   (let* ((plstore (plstore-open swelter-oauth-token-file))
-         ;; NOTE: see oauth2-compute-id
-         (id (secure-hash 'md5 (concat auth-url client-id)))
-         (plist (cdr (plstore-get plstore id))))
-    (when plist
-      ;; TODO tokens created for the same domain but different methods will collide
-      ;;      Fix by creating new token struct
+         (id (swelter-oauth--token-id auth-url client-id))
+         (tokens (cdr (plstore-get plstore id)))
+         (tokens (plist-get tokens :tokens))
+         (matching-token (seq-find (lambda (t)
+                                     (not (seq-difference required-scopes (plist-get t :scope))))
+                                   tokens)))
+    ;; TODO tokens created for the same domain but different methods will collide
+    (when matching-token
       (message "got token from cache")
       (make-swelter-oauth-token
        :client-id client-id
        :client-secret client-secret
        :token-url token-url
-       :access-token (plist-get plist :access-token)
-       :refresh-token (plist-get plist :refresh-token)
-       :scope (plist-get plist :scope)
-       :access-response (plist-get plist :access-response)))))
+       :access-token (plist-get matching-token :access-token)
+       :refresh-token (plist-get matching-token :refresh-token)
+       :scope (plist-get matching-token :scope)
+       :access-response (plist-get matching-token :access-response)))))
 
 (defun swelter-oauth--store-token (token auth-url)
   "Store TOKEN against AUTH-URL."
-  (let ((id (secure-hash 'md5 (concat auth-url
-                                      (swelter-oauth-token-client-id token))))
-        (plstore (plstore-open swelter-oauth-token-file)))
-    (message "storing token for %s" auth-url)
-    (plstore-put plstore id nil `(:access-token
-                                  ,(swelter-oauth-token-access-token token)
-                                  :refresh-token
-                                  ,(swelter-oauth-token-refresh-token token)
-                                  :scope
-                                  ,(swelter-oauth-token-scope token)
-                                  :access-response
-                                  ,(swelter-oauth-token-access-response token)))
-    (plstore-save plstore)
-    token))
+  (prog1 token
+    (let* ((id (swelter-oauth--token-id auth-url (swelter-oauth-token-client-id token)))
+           (saved-token `(:access-token
+                          ,(swelter-oauth-token-access-token token)
+                          :refresh-token
+                          ,(swelter-oauth-token-refresh-token token)
+                          :scope
+                          ,(split-string (swelter-oauth-token-scope token) " ")
+                          :access-response
+                          ,(swelter-oauth-token-access-response token)))
+           (plstore (plstore-open swelter-oauth-token-file))
+           (existing-tokens (plist-get (cdr (plstore-get plstore id)) :tokens)))
+      (message "storing token for %s" auth-url)
+      ;; save a list of all tokens
+      ;; TODO remove tokens whose scopes are a subset of this one
+      (plstore-put plstore id nil `(:tokens (,saved-token . ,existing-tokens)))
+      (plstore-save plstore))))
 
 (defun swelter-oauth--token-scope-difference (token scope)
   "Return list of scopes in SCOPE but not in TOKEN struct's scopes.
@@ -383,15 +389,24 @@ and nil if expiry time could not be determined."
 
 ;; TODO scope may be empty string or nil
 (cl-defun swelter-oauth-auth-with-store (method &key auth-url token-url client-id client-secret scope)
-  "Auth perhaps with a stored token."
-  (let* ((token (swelter-oauth--get-stored-token auth-url
-                                    client-id
-                                    client-secret
-                                    token-url))
+  "Auth perhaps with a stored token.
+
+METHOD an auth flow function to call to get a new token.
+Will be called with key-word args :auth-url, :token-url, :client-id, :client-secret and :scope.
+
+AUTH-URL
+TOKEN-URL
+CLIENT-ID per spec
+CLIENT-SECRET per spec
+SCOPE."
+  (let* ((token (swelter-oauth--get-stored-token
+                 auth-url
+                 client-id
+                 client-secret
+                 token-url
+                 (split-string scope " ")))
          (expiry (when token
-                   (swelter-oauth--token-time-until-expiry token)))
-         (missing-scopes (when token
-                           (swelter-oauth--token-scope-difference token scope))))
+                   (swelter-oauth--token-time-until-expiry token))))
     (cond
      ;; cache miss
      ((not token)
@@ -403,18 +418,6 @@ and nil if expiry time could not be determined."
                  :client-id client-id
                  :client-secret client-secret
                  :scope scope))
-       auth-url))
-     ;; if there are missing scopes then refresh will not help
-     (missing-scopes
-      (swelter-oauth--store-token
-       (aio-wait-for
-        (funcall method
-                 :auth-url auth-url
-                 :token-url token-url
-                 :client-id client-id
-                 :client-secret client-secret
-                 ;; NOTE: extends stored scope with missing scope
-                 :scope (string-trim (string-join (cons (swelter-oauth-token-scope token) missing-scopes) " "))))
        auth-url))
      ;; expired
      ((or (not expiry) (<= expiry 0))
