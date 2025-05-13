@@ -365,23 +365,22 @@ SCOPE may be a sequence of strings or a single string with space-delimited scope
 Result is negative if TOKEN is already expired, positive if still valid,
 and nil if expiry time could not be determined."
   ;; if there is no access token, then return nil
-  (when-let* ((access-token (oauth2-token-access-token token))
-              ;; TODO perhaps replace with jwt lib
-              (jwt-payload (nth 1 (string-split access-token "\\.")))
-              (jwt-payload (json-parse-string (base64-decode-string jwt-payload 't))))
-
-    (let* ((expiry (map-elt (oauth2-token-access-response token) 'expires_in))
-           (jwt-iat (map-elt jwt-payload "iat"))
-           (jwt-exp (map-elt jwt-payload "exp"))
+  (when-let* ((access-token (oauth2-token-access-token token)))
+    ;; access-token may or may not be a JWT
+    (let* ((jwt-payload (nth 1 (string-split access-token "\\."))) ;; TODO perhaps replace with jwt lib
+           (jwt-payload (when jwt-payload
+                          (json-parse-string (base64-decode-string jwt-payload 't))))
+           (access-response (oauth2-token-access-response token))
+           (expiry (map-elt access-response 'expires_in)) ;; lifetime in seconds
+           (jwt-iat (map-elt jwt-payload "iat"))          ;; issued at
+           (absolute-expiry-time (or (map-elt access-response 'expires_at)
+                                     ;; A JWT "exp" claim gives the absolute expiry time
+                                     (map-elt jwt-payload "exp")
+                                     ;; Otherwise try using "iat" and expires_in
+                                     (when (and jwt-iat expiry) (+ jwt-iat expiry))))
            (time-seconds (time-convert (current-time) 'integer)))
-      (cond
-       ;; A JWT "exp" claim gives the absolute expiry time
-       (jwt-exp
-        (- jwt-exp time-seconds))
-       ;; Otherwise the response may give a lifetime in seconds
-       ;; This needs the JWT "iat" claim to work out the actual age
-       ((and jwt-iat expiry)
-        (- (+ jwt-iat expiry) time-seconds))))))
+      (when absolute-expiry-time
+        (- absolute-expiry-time time-seconds)))))
 
 ;; TODO scope may be empty string or nil
 (cl-defun swelter-oauth-auth-with-store (method &key auth-url token-url client-id client-secret scope)

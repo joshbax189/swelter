@@ -107,6 +107,14 @@
          (token (make-oauth2-token :access-token (swelter-oauth-test--make-jwt jwt-payload))))
     (should (< (swelter-oauth--token-time-until-expiry token) 0))))
 
+(ert-deftest swelter-oauth--token-time-until-expiry/non-jwt ()
+  "Non-JWT tokens can have an expires_at header."
+  (let* ((now (time-convert (current-time) 'integer))
+         (expires-at (+ now 3600))
+         (token (make-oauth2-token :access-token "00000000"
+                                   :access-response `((expires_at . ,expires-at)))))
+    (should (> (swelter-oauth--token-time-until-expiry token) 0))))
+
 (ert-deftest swelter-oauth--token-time-until-expiry/no-expiry-info ()
   (let ((token (make-oauth2-token)))
     (should-not (swelter-oauth--token-time-until-expiry token))))
