@@ -55,8 +55,7 @@
   refresh-token
   scope
   access-response
-  plstore
-  plstore-id)
+  plstore)
 
 ;; NOTE unlike the original oauth2 method, redirect-uri is not optional
 (defun oauth2-request-access (token-url client-id client-secret code redirect-uri &optional scope)
@@ -321,7 +320,6 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
       ;;      Fix by creating new token struct
       (message "got token from cache")
       (make-oauth2-token :plstore plstore
-                         :plstore-id id
                          :client-id client-id
                          ;; TODO are both of these required?
                          :client-secret client-secret
@@ -338,7 +336,6 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
         (plstore (plstore-open swelter-oauth-token-file)))
     ;; Set the plstore in the token
     (setf (oauth2-token-plstore token) plstore)
-    (setf (oauth2-token-plstore-id token) id)
     (message "storing token for %s" auth-url)
     (plstore-put plstore id nil `(:access-token
                                   ,(oauth2-token-access-token token)
