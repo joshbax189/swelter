@@ -248,7 +248,8 @@ SEC-OBJ is the security scheme object."
                             ,(map-elt sec-obj "tokenUrl")
                             :client-id ,client-id
                             :client-secret ,client-secret
-                            :scope scope)))
+                            :scope scope))
+                    (token (oauth2-token-access-token token)))
           (cons "Authorization" (format "Bearer %s" token)))))))
 
 (defun swelter--build-api-key (client-name scheme-name sec-obj)

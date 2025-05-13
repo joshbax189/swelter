@@ -45,7 +45,7 @@
                  :client-secret "b"
                  :access-token "foobar"
                  :refresh-token "baz123"
-                 :access-response `((scope . ,scope)))))
+                 :scope scope)))
     (should-not (swelter-oauth--token-scope-difference token scope))
     ;; read:profile is in token, so ok
     (should-not (swelter-oauth--token-scope-difference token '("read:profile")))

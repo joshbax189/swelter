@@ -53,14 +53,14 @@
   token-url
   access-token
   refresh-token
+  scope
   access-response
   plstore
   plstore-id)
 
 ;; NOTE unlike the original oauth2 method, redirect-uri is not optional
-(defun oauth2-request-access (token-url client-id client-secret code redirect-uri)
+(defun oauth2-request-access (token-url client-id client-secret code redirect-uri &optional scope)
   "Request OAuth access at TOKEN-URL.
-The CODE should be obtained with `oauth2-request-authorization'.
 Return an `oauth2-token' structure."
   (when code
     (let* ((query (url-build-query-string `(("client_id" ,client-id)
@@ -70,11 +70,15 @@ Return an `oauth2-token' structure."
                                             ("grant_type" "authorization_code"))))
            (result (oauth2-make-access-request
                     token-url
-                    query)))
+                    query))
+           (scope (or (map-elt result 'scope)
+                      scope
+                      "")))
       (make-oauth2-token :client-id client-id
                          :client-secret client-secret
                          :access-token (map-elt result 'access_token)
                          :refresh-token (map-elt result 'refresh_token)
+                         :scope scope
                          :token-url token-url
                          :access-response result))))
 
@@ -151,12 +155,13 @@ Returns nil, if SCOPE-OBJ is nil.  The result is not url encoded."
                   ("client_id" ,client-id)
                   ("redirect_uri" ,redirect-uri)
                   ("state" ,state)))
+         ;; assume scope is already a string here?
          (query (if scope
-                    (append query `(("scope" ,(swelter-oauth--swagger-oauth-scopes-to-string scope))))
+                    (append query `(("scope" ,(if (stringp scope) scope (swelter-oauth--swagger-oauth-scopes-to-string scope)))))
                   query))
          (authorize-url (concat auth-url "?" (url-build-query-string query)))
          (cb (lambda (httpcon)
-               (when-let ((code (assoc "code" (elnode-http-params httpcon))))
+               (when-let* ((code (assoc "code" (elnode-http-params httpcon))))
                  (unless (equal state
                                 (cdr (assoc "state" (elnode-http-params httpcon))))
                    (warn "OAuth state invalid")
@@ -166,8 +171,7 @@ Returns nil, if SCOPE-OBJ is nil.  The result is not url encoded."
 
                  (message "get token")
                  ;; closure: token-url, client-id, client-secret, redirect-uri
-                 (let ((token (oauth2-request-access token-url client-id client-secret (cdr code) redirect-uri)))
-                   ;; TODO store token cf oauth2-auth-and-store
+                 (let ((token (oauth2-request-access token-url client-id client-secret (cdr code) redirect-uri scope)))
                    (message "token retrieved")
                    (print token)
                    (aio-resolve promise (lambda () token))))
@@ -228,6 +232,7 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                           :client-secret client-secret
                           :access-token (map-elt result "access_token")
                           :refresh-token (map-elt result "refresh_token")
+                          :scope scope
                           :access-response result))))))))
 
 ;; TODO check that it requires auth-url not token-url
@@ -258,6 +263,7 @@ SCOPE If the application is requesting a token with limited scope, it should pro
                           :client-secret client-secret
                           :access-token (map-elt result "access_token")
                           :refresh-token (map-elt result "refresh_token")
+                          :scope scope
                           :access-response result))))))))
 
 (cl-defun swelter-oauth-refresh-flow (&key token-url token client-id client-secret scope &allow-other-keys)
@@ -290,11 +296,18 @@ SCOPE Optional, must match scope of original token."
                           :client-secret client-secret
                           :token-url token-url
                           :access-token (map-elt result "access_token")
+                          :scope scope
                           ;; Assume current refresh token remains valid
                           :refresh-token (or (map-elt result "refresh_token") token)
                           :access-response result))))))))
 
 ;;;; Stored Tokens
+(defun swelter-oauth--token-id (auth-url client-id)
+  "Make an id for a token.
+AUTH-URL used to identify host
+CLIENT-ID identify different clients for same host, this is the OAuth client id."
+  (secure-hash 'md5 (concat auth-url client-id)))
+
 (defun swelter-oauth--get-stored-token (auth-url client-id &optional client-secret token-url)
   "Get and rehydrate stored token for AUTH-URL and CLIENT-ID.
 
@@ -315,6 +328,7 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
                          :token-url token-url
                          :access-token (plist-get plist :access-token)
                          :refresh-token (plist-get plist :refresh-token)
+                         :scope (plist-get plist :scope)
                          :access-response (plist-get plist :access-response)))))
 
 (defun swelter-oauth--store-token (token auth-url)
@@ -330,17 +344,12 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
                                   ,(oauth2-token-access-token token)
                                   :refresh-token
                                   ,(oauth2-token-refresh-token token)
+                                  :scope
+                                  ,(oauth2-token-scope token)
                                   :access-response
                                   ,(oauth2-token-access-response token)))
     (plstore-save plstore)
     token))
-
-(defun swelter-oauth--token-scope (token)
-  "Get TOKEN scope as a list of strings."
-  ;; FIXME: actually store scopes in the main token
-  (when-let* ((scope (map-elt
-                      (oauth2-token-access-response token) 'scope)))
-   (string-split scope " " t)))
 
 (defun swelter-oauth--token-scope-difference (token scope)
   "Return list of scopes in SCOPE but not in TOKEN struct's scopes.
@@ -348,8 +357,8 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
 SCOPE may be a sequence of strings or a single string with space-delimited scopes."
   (when (stringp scope)
     (setq scope (string-split scope " " t)))
-  (let ((token-scopes
-         (swelter-oauth--token-scope token)))
+  (let* ((token-scopes (or (oauth2-token-scope token) ""))
+         (token-scopes (string-split token-scopes " " t)))
     (seq-difference scope token-scopes)))
 
 ;; NOTE assumes TOKEN has access-response that includes expires_in
@@ -410,7 +419,7 @@ and nil if expiry time could not be determined."
                  :client-id client-id
                  :client-secret client-secret
                  ;; NOTE: extends stored scope with missing scope
-                 :scope (append missing-scopes (swelter-oauth--token-scope token))))
+                 :scope (string-trim (string-join (cons (oauth2-token-scope token) missing-scopes) " "))))
        auth-url))
      ;; expired
      ((or (not expiry) (<= expiry 0))
@@ -433,7 +442,7 @@ and nil if expiry time could not be determined."
                    :client-id client-id
                    :client-secret client-secret
                    :scope scope))
-         auth-url)))
+         auth-url))
      ;; otherwise use stored token
      (t token))))
 
