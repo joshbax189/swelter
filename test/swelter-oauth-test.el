@@ -26,7 +26,7 @@
 (ert-deftest swelter-oauth--token-scope-difference/test-empty ()
   "Tests empty scope edge cases."
   (let* ((scope "read:profile write:profile")
-         (token (make-oauth2-token
+         (token (make-swelter-oauth-token
                  :client-id "a"
                  :client-secret "b"
                  :access-token "foobar"
@@ -34,13 +34,13 @@
                  :access-response `((scope . ,scope)))))
     (should-not (swelter-oauth--token-scope-difference token nil))
     (should-not (swelter-oauth--token-scope-difference token ""))
-    (setf (oauth2-token-access-response token) '((scope . "")))
+    (setf (swelter-oauth-token-access-response token) '((scope . "")))
     (should-not (swelter-oauth--token-scope-difference token nil))))
 
 (ert-deftest swelter-oauth--token-scope-difference/test-basic ()
   "Tests normal behavior."
   (let* ((scope "read:profile write:profile")
-         (token (make-oauth2-token
+         (token (make-swelter-oauth-token
                  :client-id "a"
                  :client-secret "b"
                  :access-token "foobar"
@@ -64,7 +64,7 @@
                  (client-id "a-client")
                  (client-secret "a-secret")
                  (scope "read:profile write:profile")
-                 (token (make-oauth2-token
+                 (token (make-swelter-oauth-token
                          :client-id client-id
                          :client-secret client-secret
                          :access-token "foobar"
@@ -76,7 +76,7 @@
             ;; can get the same token back
             (setq result (swelter-oauth--get-stored-token auth-url client-id scope client-secret))
             (should result)
-            (should (equal "foobar" (oauth2-token-access-token result)))))
+            (should (equal "foobar" (swelter-oauth-token-access-token result)))))
       (setq swelter-oauth-token-file original-plstore))))
 
 (ert-deftest swelter-oauth--token-time-until-expiry/jwt-exp ()
@@ -84,7 +84,7 @@
   (let* ((now (time-convert (current-time) 'integer))
          (jwt-exp (+ now 3600))
          (jwt-payload `(("exp" . ,jwt-exp)))
-         (token (make-oauth2-token :access-token (swelter-oauth-test--make-jwt jwt-payload))))
+         (token (make-swelter-oauth-token :access-token (swelter-oauth-test--make-jwt jwt-payload))))
     (should (eq (- jwt-exp now)
                 (swelter-oauth--token-time-until-expiry token)))))
 
@@ -94,7 +94,7 @@
          (jwt-iat (- now 3600))
          (expires-in 7200)
          (jwt-payload `(("iat" . ,jwt-iat)))
-         (token (make-oauth2-token :access-token (swelter-oauth-test--make-jwt jwt-payload)
+         (token (make-swelter-oauth-token :access-token (swelter-oauth-test--make-jwt jwt-payload)
                                    :access-response `((expires_in . ,expires-in)))))
     (should (eq (- (+ jwt-iat expires-in) now)
                 (swelter-oauth--token-time-until-expiry token)))))
@@ -104,19 +104,19 @@
   (let* ((now (time-convert (current-time) 'integer))
          (jwt-exp (- now 3600)) ;; expiry in the past
          (jwt-payload `(("exp" . ,jwt-exp)))
-         (token (make-oauth2-token :access-token (swelter-oauth-test--make-jwt jwt-payload))))
+         (token (make-swelter-oauth-token :access-token (swelter-oauth-test--make-jwt jwt-payload))))
     (should (< (swelter-oauth--token-time-until-expiry token) 0))))
 
 (ert-deftest swelter-oauth--token-time-until-expiry/non-jwt ()
   "Non-JWT tokens can have an expires_at header."
   (let* ((now (time-convert (current-time) 'integer))
          (expires-at (+ now 3600))
-         (token (make-oauth2-token :access-token "00000000"
+         (token (make-swelter-oauth-token :access-token "00000000"
                                    :access-response `((expires_at . ,expires-at)))))
     (should (> (swelter-oauth--token-time-until-expiry token) 0))))
 
 (ert-deftest swelter-oauth--token-time-until-expiry/no-expiry-info ()
-  (let ((token (make-oauth2-token)))
+  (let ((token (make-swelter-oauth-token)))
     (should-not (swelter-oauth--token-time-until-expiry token))))
 
 ;;; swelter-oauth-test.el ends here

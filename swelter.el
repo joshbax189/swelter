@@ -249,7 +249,7 @@ SEC-OBJ is the security scheme object."
                             :client-id ,client-id
                             :client-secret ,client-secret
                             :scope scope))
-                    (token (oauth2-token-access-token token)))
+                    (token (swelter-oauth-token-access-token token)))
           (cons "Authorization" (format "Bearer %s" token)))))))
 
 (defun swelter--build-api-key (client-name scheme-name sec-obj)

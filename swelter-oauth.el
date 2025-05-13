@@ -44,10 +44,8 @@
   :group 'swelter
   :type 'file)
 
-;; TODO update to something useful
-;; TODO namespace to this package
-
-(cl-defstruct oauth2-token
+(cl-defstruct swelter-oauth-token
+  ;; TODO which of these slots are still required?
   client-id
   client-secret
   token-url
@@ -58,30 +56,36 @@
   plstore)
 
 ;; NOTE unlike the original oauth2 method, redirect-uri is not optional
-(defun oauth2-request-access (token-url client-id client-secret code redirect-uri &optional scope)
-  "Request OAuth access at TOKEN-URL.
-Return an `oauth2-token' structure."
+(defun swelter-oauth--request-access (token-url client-id client-secret code redirect-uri &optional scope)
+  "Request OAuth access at TOKEN-URL using CODE.
+Return a `swelter-oauth-token' structure.
+
+This is the second step in the \"access code\" OAuth flow.
+CLIENT-ID, CLIENT-SECRET and REDIRECT-URI are as defined there.
+SCOPE, if present is a space-separated string of scopes.
+It may be required if the response or token does not include scopes."
   (when code
     (let* ((query (url-build-query-string `(("client_id" ,client-id)
                                             ("client_secret" ,client-secret)
                                             ("code" ,code)
                                             ("redirect_uri" ,redirect-uri)
                                             ("grant_type" "authorization_code"))))
-           (result (oauth2-make-access-request
+           (result (swelter-oauth--make-access-request
                     token-url
                     query))
            (scope (or (map-elt result 'scope)
                       scope
                       "")))
-      (make-oauth2-token :client-id client-id
-                         :client-secret client-secret
-                         :access-token (map-elt result 'access_token)
-                         :refresh-token (map-elt result 'refresh_token)
-                         :scope scope
-                         :token-url token-url
-                         :access-response result))))
+      (make-swelter-oauth-token
+       :client-id client-id
+       :client-secret client-secret
+       :access-token (map-elt result 'access_token)
+       :refresh-token (map-elt result 'refresh_token)
+       :scope scope
+       :token-url token-url
+       :access-response result))))
 
-(defun oauth2-make-access-request (url data)
+(defun swelter-oauth--make-access-request (url data)
   "Make an access request to URL using DATA in POST."
   (let ((url-request-method "POST")
         (url-request-data data)
@@ -170,7 +174,7 @@ Returns nil, if SCOPE-OBJ is nil.  The result is not url encoded."
 
                  (message "get token")
                  ;; closure: token-url, client-id, client-secret, redirect-uri
-                 (let ((token (oauth2-request-access token-url client-id client-secret (cdr code) redirect-uri scope)))
+                 (let ((token (swelter-oauth--request-access token-url client-id client-secret (cdr code) redirect-uri scope)))
                    (message "token retrieved")
                    (print token)
                    (aio-resolve promise (lambda () token))))
@@ -226,7 +230,7 @@ SCOPE If the application is requesting a token with limited scope, it should pro
         (let ((result (json-parse-buffer)))
           (aio-resolve promise
                        (lambda ()
-                         (make-oauth2-token
+                         (make-swelter-oauth-token
                           :client-id client-id
                           :client-secret client-secret
                           :access-token (map-elt result "access_token")
@@ -257,7 +261,7 @@ SCOPE If the application is requesting a token with limited scope, it should pro
         (let ((result (json-parse-buffer)))
           (aio-resolve promise
                        (lambda ()
-                         (make-oauth2-token
+                         (make-swelter-oauth-token
                           :client-id client-id
                           :client-secret client-secret
                           :access-token (map-elt result "access_token")
@@ -290,7 +294,7 @@ SCOPE Optional, must match scope of original token."
         (let ((result (json-parse-buffer)))
           (aio-resolve promise
                        (lambda ()
-                         (make-oauth2-token
+                         (make-swelter-oauth-token
                           :client-id client-id
                           :client-secret client-secret
                           :token-url token-url
@@ -319,32 +323,32 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
       ;; TODO tokens created for the same domain but different methods will collide
       ;;      Fix by creating new token struct
       (message "got token from cache")
-      (make-oauth2-token :plstore plstore
-                         :client-id client-id
-                         ;; TODO are both of these required?
-                         :client-secret client-secret
-                         :token-url token-url
-                         :access-token (plist-get plist :access-token)
-                         :refresh-token (plist-get plist :refresh-token)
-                         :scope (plist-get plist :scope)
-                         :access-response (plist-get plist :access-response)))))
+      (make-swelter-oauth-token :plstore plstore
+              :client-id client-id
+              ;; TODO are both of these required?
+              :client-secret client-secret
+              :token-url token-url
+              :access-token (plist-get plist :access-token)
+              :refresh-token (plist-get plist :refresh-token)
+              :scope (plist-get plist :scope)
+              :access-response (plist-get plist :access-response)))))
 
 (defun swelter-oauth--store-token (token auth-url)
   "Store TOKEN against AUTH-URL."
   (let ((id (secure-hash 'md5 (concat auth-url
-                                      (oauth2-token-client-id token))))
+                                      (swelter-oauth-token-client-id token))))
         (plstore (plstore-open swelter-oauth-token-file)))
     ;; Set the plstore in the token
-    (setf (oauth2-token-plstore token) plstore)
+    (setf (swelter-oauth-token-plstore token) plstore)
     (message "storing token for %s" auth-url)
     (plstore-put plstore id nil `(:access-token
-                                  ,(oauth2-token-access-token token)
+                                  ,(swelter-oauth-token-access-token token)
                                   :refresh-token
-                                  ,(oauth2-token-refresh-token token)
+                                  ,(swelter-oauth-token-refresh-token token)
                                   :scope
-                                  ,(oauth2-token-scope token)
+                                  ,(swelter-oauth-token-scope token)
                                   :access-response
-                                  ,(oauth2-token-access-response token)))
+                                  ,(swelter-oauth-token-access-response token)))
     (plstore-save plstore)
     token))
 
@@ -354,7 +358,7 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
 SCOPE may be a sequence of strings or a single string with space-delimited scopes."
   (when (stringp scope)
     (setq scope (string-split scope " " t)))
-  (let* ((token-scopes (or (oauth2-token-scope token) ""))
+  (let* ((token-scopes (or (swelter-oauth-token-scope token) ""))
          (token-scopes (string-split token-scopes " " t)))
     (seq-difference scope token-scopes)))
 
@@ -365,12 +369,12 @@ SCOPE may be a sequence of strings or a single string with space-delimited scope
 Result is negative if TOKEN is already expired, positive if still valid,
 and nil if expiry time could not be determined."
   ;; if there is no access token, then return nil
-  (when-let* ((access-token (oauth2-token-access-token token)))
+  (when-let* ((access-token (swelter-oauth-token-access-token token)))
     ;; access-token may or may not be a JWT
     (let* ((jwt-payload (nth 1 (string-split access-token "\\."))) ;; TODO perhaps replace with jwt lib
            (jwt-payload (when jwt-payload
                           (json-parse-string (base64-decode-string jwt-payload 't))))
-           (access-response (oauth2-token-access-response token))
+           (access-response (swelter-oauth-token-access-response token))
            (expiry (map-elt access-response 'expires_in)) ;; lifetime in seconds
            (jwt-iat (map-elt jwt-payload "iat"))          ;; issued at
            (absolute-expiry-time (or (map-elt access-response 'expires_at)
@@ -415,11 +419,11 @@ and nil if expiry time could not be determined."
                  :client-id client-id
                  :client-secret client-secret
                  ;; NOTE: extends stored scope with missing scope
-                 :scope (string-trim (string-join (cons (oauth2-token-scope token) missing-scopes) " "))))
+                 :scope (string-trim (string-join (cons (swelter-oauth-token-scope token) missing-scopes) " "))))
        auth-url))
      ;; expired
      ((or (not expiry) (<= expiry 0))
-      (if-let* ((refresh-token (oauth2-token-refresh-token token)))
+      (if-let* ((refresh-token (swelter-oauth-token-refresh-token token)))
           (swelter-oauth--store-token
            (aio-wait-for
             (swelter-oauth-refresh-flow
