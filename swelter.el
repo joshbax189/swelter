@@ -44,7 +44,7 @@ URL fallback url if server is not specified in the swagger."
            ;; only resolve $refs from same host
            (server-root (swelter--get-server-root-url-v2 swagger-obj url))
            (remote (when server-root (jsonp-remote :whitelist (list server-root))))
-           (swagger-obj (jsonp-replace-refs swagger-obj nil nil remote)))
+           (swagger-obj (jsonp-replace-refs swagger-obj nil nil remote url)))
       (swelter-generate client swagger-obj (or url "")))))
 
 (defun swelter--print-form (form &optional trailing-newline)
@@ -69,7 +69,7 @@ URL fallback url if server is not specified in the swagger."
            ;; only resolve $refs from same host
            (server-root (swelter--get-server-root-url-v2 swagger-obj url))
            (remote (when server-root (jsonp-remote :whitelist (list server-root))))
-           (swagger-obj (jsonp-replace-refs swagger-obj nil nil remote)))
+           (swagger-obj (jsonp-replace-refs swagger-obj nil nil remote (unless (string-empty-p url) url))))
       (swelter-generate client swagger-obj url))))
 
 (defun swelter-generate (client swagger-obj url)
@@ -162,7 +162,7 @@ Throws if missing or not a valid json."
          ;; only resolve $refs from same host
          (server-root (url-host (url-generic-parse-url url)))
          (remote (when server-root (jsonp-remote :whitelist (list server-root))))
-         (result (jsonp-replace-refs swagger-json nil nil remote)))
+         (result (jsonp-replace-refs swagger-json nil nil remote url)))
     (with-current-buffer (get-buffer-create "*swelter-debug*")
       (cl-prettyprint result))
     result))
