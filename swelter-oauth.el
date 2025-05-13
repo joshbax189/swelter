@@ -45,15 +45,13 @@
   :type 'file)
 
 (cl-defstruct swelter-oauth-token
-  ;; TODO which of these slots are still required?
   client-id
   client-secret
   token-url
   access-token
   refresh-token
   scope
-  access-response
-  plstore)
+  access-response)
 
 ;; NOTE unlike the original oauth2 method, redirect-uri is not optional
 (defun swelter-oauth--request-access (token-url client-id client-secret code redirect-uri &optional scope)
@@ -311,10 +309,10 @@ AUTH-URL used to identify host
 CLIENT-ID identify different clients for same host, this is the OAuth client id."
   (secure-hash 'md5 (concat auth-url client-id)))
 
-(defun swelter-oauth--get-stored-token (auth-url client-id &optional client-secret token-url)
+(defun swelter-oauth--get-stored-token (auth-url client-id client-secret token-url)
   "Get and rehydrate stored token for AUTH-URL and CLIENT-ID.
 
-Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
+Note CLIENT-SECRET and TOKEN-URL are required to rehydrate the token."
   (let* ((plstore (plstore-open swelter-oauth-token-file))
          ;; NOTE: see oauth2-compute-id
          (id (secure-hash 'md5 (concat auth-url client-id)))
@@ -323,23 +321,20 @@ Note CLIENT-SECRET and TOKEN-URL are only used to rehydrate the token."
       ;; TODO tokens created for the same domain but different methods will collide
       ;;      Fix by creating new token struct
       (message "got token from cache")
-      (make-swelter-oauth-token :plstore plstore
-              :client-id client-id
-              ;; TODO are both of these required?
-              :client-secret client-secret
-              :token-url token-url
-              :access-token (plist-get plist :access-token)
-              :refresh-token (plist-get plist :refresh-token)
-              :scope (plist-get plist :scope)
-              :access-response (plist-get plist :access-response)))))
+      (make-swelter-oauth-token
+       :client-id client-id
+       :client-secret client-secret
+       :token-url token-url
+       :access-token (plist-get plist :access-token)
+       :refresh-token (plist-get plist :refresh-token)
+       :scope (plist-get plist :scope)
+       :access-response (plist-get plist :access-response)))))
 
 (defun swelter-oauth--store-token (token auth-url)
   "Store TOKEN against AUTH-URL."
   (let ((id (secure-hash 'md5 (concat auth-url
                                       (swelter-oauth-token-client-id token))))
         (plstore (plstore-open swelter-oauth-token-file)))
-    ;; Set the plstore in the token
-    (setf (swelter-oauth-token-plstore token) plstore)
     (message "storing token for %s" auth-url)
     (plstore-put plstore id nil `(:access-token
                                   ,(swelter-oauth-token-access-token token)
